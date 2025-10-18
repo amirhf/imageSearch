@@ -47,9 +47,16 @@ CAPTION_CONFIDENCE_THRESHOLD=0.55
 CAPTION_LATENCY_BUDGET_MS=600
 ```
 
-## Run tests (placeholder)
+## Run tests
 ```bash
-pytest -q
+# Run all CI/CD safe tests
+python tests/test_infrastructure.py
+python tests/test_load.py
+
+# Or use pytest
+pytest tests/ -v
+
+# See tests/README.md for more options
 ```
 
 ## Observability
