@@ -1,0 +1,81 @@
+# OpenRouter Model Pricing Configuration
+# Source: https://openrouter.ai/models
+# Last updated: 2025-10-19
+
+# Default model for development and testing
+default: openai/gpt-4o-mini
+
+# Model pricing (per million tokens)
+models:
+  # OpenAI Models
+  openai/gpt-4o-mini:
+    input_per_million: 0.15
+    output_per_million: 0.60
+    recommended: true
+    use_case: "Best balance of cost/quality for dev/testing"
+    context_window: 128000
+    
+  openai/gpt-4o:
+    input_per_million: 2.50
+    output_per_million: 10.00
+    recommended: false
+    use_case: "Higher quality, more expensive"
+    context_window: 128000
+
+  # Google Gemini Models
+  google/gemini-flash-1.5:
+    input_per_million: 0.075
+    output_per_million: 0.30
+    recommended: true
+    use_case: "Cheapest option, good for high volume"
+    context_window: 1000000
+    
+  google/gemini-pro-1.5:
+    input_per_million: 1.25
+    output_per_million: 5.00
+    recommended: false
+    use_case: "Better quality, moderate cost"
+    context_window: 2000000
+
+  # Anthropic Claude Models
+  anthropic/claude-3-haiku:
+    input_per_million: 0.25
+    output_per_million: 1.25
+    recommended: true
+    use_case: "Good balance, faster than sonnet"
+    context_window: 200000
+    
+  anthropic/claude-3.5-sonnet:
+    input_per_million: 3.00
+    output_per_million: 15.00
+    recommended: false
+    use_case: "Highest quality, use for quality mode only"
+    context_window: 200000
+
+# Typical usage estimates for image captioning
+usage_estimates:
+  avg_input_tokens: 1000  # Typical image encoding
+  avg_output_tokens: 20   # Short caption
+  
+  # Cost per image by model
+  costs_per_image:
+    openai/gpt-4o-mini: 0.0003
+    google/gemini-flash-1.5: 0.0002
+    anthropic/claude-3-haiku: 0.0005
+    anthropic/claude-3.5-sonnet: 0.006
+
+# Budget planning examples
+budget_examples:
+  - images: 1000
+    model: openai/gpt-4o-mini
+    estimated_cost_usd: 0.30
+    
+  - images: 10000
+    model: openai/gpt-4o-mini
+    estimated_cost_usd: 3.00
+    with_80_percent_local_hit_rate: 0.60
+    
+  - images: 100000
+    model: google/gemini-flash-1.5
+    estimated_cost_usd: 20.00
+    with_80_percent_local_hit_rate: 4.00

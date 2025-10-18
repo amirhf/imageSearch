@@ -10,6 +10,9 @@ try:
 except Exception:
     _BLIP_OK = False
 
+from apps.api.services.cloud_providers.factory import CloudProviderFactory
+from apps.api.services.cloud_providers.circuit_breaker import get_circuit_breaker
+
 _processor = None
 _model = None
 
@@ -23,6 +26,22 @@ def _load_blip():
         _model.eval()
 
 class CaptionerClient:
+    def __init__(self):
+        """Initialize captioner with lazy-loaded cloud provider"""
+        self._cloud_provider = None
+        self._circuit_breaker = get_circuit_breaker()
+    
+    def _get_cloud_provider(self):
+        """Lazy load cloud provider"""
+        if self._cloud_provider is None:
+            try:
+                self._cloud_provider = CloudProviderFactory.create()
+                print(f"[CaptionerClient] Cloud provider initialized: {self._cloud_provider.get_provider_name()}")
+            except Exception as e:
+                print(f"[WARN] Could not initialize cloud provider: {e}")
+                self._cloud_provider = None
+        return self._cloud_provider
+    
     async def caption(self, img_bytes: bytes) -> Tuple[str, float, int]:
         start = time.time()
         _load_blip()
@@ -37,6 +56,34 @@ class CaptionerClient:
         return text, conf, ms
 
     async def caption_cloud(self, img_bytes: bytes) -> Tuple[Optional[str], int, float]:
-        # TODO: implement OpenAI/Gemini/Anthropic adapters
-        # Return (caption, latency_ms, cost_usd)
-        return None, 0, 0.0
+        """
+        Generate caption using cloud provider (OpenRouter).
+        
+        Returns:
+            Tuple of (caption, latency_ms, cost_usd)
+            Returns (None, 0, 0.0) if cloud provider unavailable or circuit breaker open
+        """
+        # Check circuit breaker
+        can_proceed, reason = self._circuit_breaker.can_proceed()
+        if not can_proceed:
+            print(f"[CaptionerClient] {reason}")
+            return None, 0, 0.0
+        
+        try:
+            provider = self._get_cloud_provider()
+            if provider is None:
+                return None, 0, 0.0
+            
+            # Make cloud API call
+            response = await provider.caption(img_bytes)
+            
+            # Record success
+            self._circuit_breaker.record_success()
+            
+            return (response.caption, response.latency_ms, response.cost_usd)
+        
+        except Exception as e:
+            # Record failure
+            self._circuit_breaker.record_failure()
+            print(f"[ERROR] Cloud caption failed: {e}")
+            return None, 0, 0.0
