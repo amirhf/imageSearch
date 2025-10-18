@@ -1,0 +1,3 @@
+{
+  "__comment": "Placeholder for Grafana dashboard JSON. Import manually or add panels for router_local_total, router_cloud_total, request_latency_ms."
+}
