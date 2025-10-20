@@ -5,6 +5,12 @@ import os
 from enum import Enum
 from typing import Optional
 
+try:
+    from .metrics import get_metrics
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
+
 
 class CircuitState(Enum):
     """Circuit breaker states"""
@@ -49,7 +55,10 @@ class CircuitBreaker:
         self.opened_at = None
         self.half_open_calls = 0
         
-        print(f"[CircuitBreaker] Initialized: threshold={self.failure_threshold}, timeout={self.timeout_seconds}s")
+        # Metrics
+        self.metrics = get_metrics() if METRICS_AVAILABLE else None
+        if self.metrics:
+            self.metrics.update_circuit_breaker_state('closed')
     
     def can_proceed(self) -> tuple[bool, Optional[str]]:
         """
@@ -72,6 +81,8 @@ class CircuitBreaker:
                 return True, None
             else:
                 remaining = self.timeout_seconds - int(current_time - self.opened_at) if self.opened_at else 0
+                if self.metrics:
+                    self.metrics.record_circuit_breaker_rejected()
                 return False, f"Circuit breaker OPEN ({remaining}s remaining until retry)"
         
         elif self.state == CircuitState.HALF_OPEN:
@@ -86,6 +97,9 @@ class CircuitBreaker:
     
     def record_success(self):
         """Record a successful request"""
+        if self.metrics:
+            self.metrics.record_circuit_breaker_success()
+        
         if self.state == CircuitState.CLOSED:
             # Reset failure count on success
             if self.failure_count > 0:
@@ -94,11 +108,13 @@ class CircuitBreaker:
         elif self.state == CircuitState.HALF_OPEN:
             self.success_count += 1
             # If success in half-open, close the circuit
-            print(f"[CircuitBreaker] Success in HALF_OPEN state, closing circuit")
             self._transition_to_closed()
     
     def record_failure(self):
         """Record a failed request"""
+        if self.metrics:
+            self.metrics.record_circuit_breaker_failure()
+        
         self.last_failure_time = time.time()
         
         if self.state == CircuitState.CLOSED:
@@ -108,21 +124,23 @@ class CircuitBreaker:
         
         elif self.state == CircuitState.HALF_OPEN:
             # Failure in half-open, go back to open
-            print(f"[CircuitBreaker] Failure in HALF_OPEN state, reopening circuit")
             self._transition_to_open()
     
     def _transition_to_open(self):
         """Transition to OPEN state"""
         self.state = CircuitState.OPEN
         self.opened_at = time.time()
-        print(f"[CircuitBreaker] Circuit OPENED after {self.failure_count} failures (will retry in {self.timeout_seconds}s)")
+        if self.metrics:
+            self.metrics.update_circuit_breaker_state('open')
+            self.metrics.record_circuit_breaker_opened()
     
     def _transition_to_half_open(self):
         """Transition to HALF_OPEN state"""
         self.state = CircuitState.HALF_OPEN
         self.half_open_calls = 0
         self.success_count = 0
-        print(f"[CircuitBreaker] Circuit HALF_OPEN (testing recovery)")
+        if self.metrics:
+            self.metrics.update_circuit_breaker_state('half_open')
     
     def _transition_to_closed(self):
         """Transition to CLOSED state"""
@@ -131,7 +149,8 @@ class CircuitBreaker:
         self.success_count = 0
         self.half_open_calls = 0
         self.opened_at = None
-        print(f"[CircuitBreaker] Circuit CLOSED (service recovered)")
+        if self.metrics:
+            self.metrics.update_circuit_breaker_state('closed')
     
     def get_stats(self) -> dict:
         """Get circuit breaker statistics"""
@@ -148,7 +167,6 @@ class CircuitBreaker:
     def reset(self):
         """Manually reset circuit breaker"""
         self._transition_to_closed()
-        print(f"[CircuitBreaker] Manually reset")
 
 
 # Global circuit breaker instance

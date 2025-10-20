@@ -1,0 +1,256 @@
+groups:
+  - name: cloud_adapter_alerts
+    interval: 30s
+    rules:
+      # ============================================================
+      # COST ALERTS
+      # ============================================================
+      
+      - alert: HighDailyCost
+        expr: sum(cloud_daily_cost_usd) > 8.0
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "Daily cloud cost exceeding 80% of budget"
+          description: "Current daily cost: ${{ $value | humanize }}. Budget: $10.00. This is 80% of the daily budget."
+          
+      - alert: CriticalDailyCost
+        expr: sum(cloud_daily_cost_usd) > 9.5
+        for: 1m
+        labels:
+          severity: critical
+          component: cloud_adapter
+        annotations:
+          summary: "Daily cloud cost approaching budget limit"
+          description: "Current daily cost: ${{ $value | humanize }}. Budget: $10.00. This is 95% of the daily budget!"
+      
+      - alert: BudgetExhausted
+        expr: sum(cloud_daily_budget_remaining_usd) <= 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cloud_adapter
+        annotations:
+          summary: "Daily budget exhausted"
+          description: "Daily budget has been exhausted. All cloud requests will be blocked until budget resets."
+      
+      # ============================================================
+      # CIRCUIT BREAKER ALERTS
+      # ============================================================
+      
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: cloud_adapter
+        annotations:
+          summary: "Circuit breaker is OPEN"
+          description: "Circuit breaker has opened due to repeated failures. Cloud provider is unavailable."
+      
+      - alert: CircuitBreakerHalfOpen
+        expr: circuit_breaker_state == 2
+        for: 2m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "Circuit breaker is testing recovery (HALF-OPEN)"
+          description: "Circuit breaker is in HALF-OPEN state, testing if the service has recovered."
+      
+      - alert: HighCircuitBreakerFailureRate
+        expr: rate(circuit_breaker_failure_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "High circuit breaker failure rate"
+          description: "Circuit breaker is recording {{ $value | humanize }} failures per second. May open soon."
+      
+      # ============================================================
+      # ERROR RATE ALERTS
+      # ============================================================
+      
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(cloud_requests_failed_total[5m])) 
+          / 
+          sum(rate(cloud_requests_total[5m])) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "High cloud request error rate"
+          description: "Error rate is {{ $value | humanizePercentage }}. More than 10% of requests are failing."
+      
+      - alert: CriticalErrorRate
+        expr: |
+          sum(rate(cloud_requests_failed_total[5m])) 
+          / 
+          sum(rate(cloud_requests_total[5m])) > 0.25
+        for: 2m
+        labels:
+          severity: critical
+          component: cloud_adapter
+        annotations:
+          summary: "Critical cloud request error rate"
+          description: "Error rate is {{ $value | humanizePercentage }}. More than 25% of requests are failing!"
+      
+      # ============================================================
+      # RATE LIMITER ALERTS
+      # ============================================================
+      
+      - alert: RateLimitApproaching
+        expr: rate_limiter_requests_per_minute > 50
+        for: 2m
+        labels:
+          severity: info
+          component: cloud_adapter
+        annotations:
+          summary: "Approaching per-minute rate limit"
+          description: "Currently at {{ $value }} requests/minute. Limit is 60/minute."
+      
+      - alert: HighRateLimitBlockRate
+        expr: rate(rate_limiter_requests_blocked_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "High rate limit block rate"
+          description: "Rate limiter is blocking {{ $value | humanize }} requests per second. Consider increasing limits."
+      
+      - alert: DailyRequestsNearLimit
+        expr: rate_limiter_requests_today > 9000
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "Daily request count approaching limit"
+          description: "{{ $value }} requests made today. Limit is 10,000/day. At 90% of limit."
+      
+      # ============================================================
+      # PERFORMANCE ALERTS
+      # ============================================================
+      
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(cloud_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "High P95 latency for cloud requests"
+          description: "P95 latency is {{ $value | humanize }}s. This is above the 5s threshold."
+      
+      - alert: VeryHighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(cloud_request_duration_seconds_bucket[5m])) by (le)
+          ) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: cloud_adapter
+        annotations:
+          summary: "Very high P95 latency for cloud requests"
+          description: "P95 latency is {{ $value | humanize }}s. This is critically high!"
+      
+      - alert: HighInFlightRequests
+        expr: sum(cloud_requests_in_flight) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "High number of in-flight cloud requests"
+          description: "{{ $value }} requests currently in progress. May indicate slow responses or high load."
+      
+      # ============================================================
+      # SERVICE HEALTH ALERTS
+      # ============================================================
+      
+      - alert: NoCloudRequests
+        expr: sum(rate(cloud_requests_total[5m])) == 0
+        for: 10m
+        labels:
+          severity: info
+          component: cloud_adapter
+        annotations:
+          summary: "No cloud requests in last 10 minutes"
+          description: "Cloud adapter has not processed any requests recently. This may be normal if there's no traffic."
+      
+      - alert: LowSuccessRate
+        expr: |
+          sum(rate(cloud_requests_total{status="success"}[5m])) 
+          / 
+          sum(rate(cloud_requests_total[5m])) < 0.90
+        for: 5m
+        labels:
+          severity: warning
+          component: cloud_adapter
+        annotations:
+          summary: "Low success rate for cloud requests"
+          description: "Success rate is {{ $value | humanizePercentage }}. Below 90% threshold."
+      
+      # ============================================================
+      # COST EFFICIENCY ALERTS
+      # ============================================================
+      
+      - alert: HighCostPerRequest
+        expr: |
+          sum(rate(cloud_cost_total_usd[1h])) 
+          / 
+          sum(rate(cloud_requests_total{status="success"}[1h])) > 0.001
+        for: 30m
+        labels:
+          severity: info
+          component: cloud_adapter
+        annotations:
+          summary: "High average cost per request"
+          description: "Average cost per request is ${{ $value | humanize }}. This is above $0.001/request."
+
+  # ============================================================
+  # RECORDING RULES (for performance)
+  # ============================================================
+  
+  - name: cloud_adapter_recording_rules
+    interval: 30s
+    rules:
+      - record: cloud:request_success_rate:5m
+        expr: |
+          sum(rate(cloud_requests_total{status="success"}[5m])) 
+          / 
+          sum(rate(cloud_requests_total[5m]))
+      
+      - record: cloud:request_error_rate:5m
+        expr: |
+          sum(rate(cloud_requests_failed_total[5m])) 
+          / 
+          sum(rate(cloud_requests_total[5m]))
+      
+      - record: cloud:cost_per_request:1h
+        expr: |
+          sum(rate(cloud_cost_total_usd[1h])) 
+          / 
+          sum(rate(cloud_requests_total{status="success"}[1h]))
+      
+      - record: cloud:p95_latency_ms:5m
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(cloud_request_duration_seconds_bucket[5m])) by (le)
+          ) * 1000
+      
+      - record: cloud:p99_latency_ms:5m
+        expr: |
+          histogram_quantile(0.99, 
+            sum(rate(cloud_request_duration_seconds_bucket[5m])) by (le)
+          ) * 1000

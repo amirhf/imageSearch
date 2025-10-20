@@ -5,6 +5,12 @@ import os
 from collections import deque
 from typing import Optional
 
+try:
+    from .metrics import get_metrics
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
+
 
 class RateLimiter:
     """
@@ -36,7 +42,8 @@ class RateLimiter:
         self.daily_cost = 0.0  # Total cost today
         self.last_reset = time.time()  # Last daily reset time
         
-        print(f"[RateLimiter] Initialized: {self.max_per_minute}/min, {self.max_per_day}/day, ${self.daily_budget_usd}/day budget")
+        # Metrics
+        self.metrics = get_metrics() if METRICS_AVAILABLE else None
     
     def _reset_daily_if_needed(self):
         """Reset daily counters if 24 hours have passed"""
@@ -45,7 +52,6 @@ class RateLimiter:
             self.daily_requests = []
             self.daily_cost = 0.0
             self.last_reset = now
-            print(f"[RateLimiter] Daily counters reset at {time.strftime('%Y-%m-%d %H:%M:%S')}")
     
     def can_proceed(self, estimated_cost_usd: float = 0.001) -> tuple[bool, Optional[str]]:
         """
@@ -63,16 +69,29 @@ class RateLimiter:
         # Check daily budget
         if self.daily_cost + estimated_cost_usd > self.daily_budget_usd:
             remaining = max(0, self.daily_budget_usd - self.daily_cost)
-            return False, f"Daily budget exceeded (${self.daily_cost:.4f}/${self.daily_budget_usd}, ${remaining:.4f} remaining)"
+            reason = f"Daily budget exceeded (${self.daily_cost:.4f}/${self.daily_budget_usd}, ${remaining:.4f} remaining)"
+            if self.metrics:
+                self.metrics.record_rate_limit_blocked('budget')
+            return False, reason
         
         # Check per-minute limit
         self.minute_requests = deque([t for t in self.minute_requests if now - t < 60])
         if len(self.minute_requests) >= self.max_per_minute:
-            return False, f"Per-minute limit exceeded ({len(self.minute_requests)}/{self.max_per_minute})"
+            reason = f"Per-minute limit exceeded ({len(self.minute_requests)}/{self.max_per_minute})"
+            if self.metrics:
+                self.metrics.record_rate_limit_blocked('per_minute')
+            return False, reason
         
         # Check per-day limit
         if len(self.daily_requests) >= self.max_per_day:
-            return False, f"Per-day limit exceeded ({len(self.daily_requests)}/{self.max_per_day})"
+            reason = f"Per-day limit exceeded ({len(self.daily_requests)}/{self.max_per_day})"
+            if self.metrics:
+                self.metrics.record_rate_limit_blocked('per_day')
+            return False, reason
+        
+        # Request allowed
+        if self.metrics:
+            self.metrics.record_rate_limit_allowed()
         
         return True, None
     
@@ -87,6 +106,10 @@ class RateLimiter:
         self.minute_requests.append(now)
         self.daily_requests.append(now)
         self.daily_cost += cost_usd
+        
+        # Update metrics
+        if self.metrics:
+            self._update_metrics()
     
     def get_stats(self) -> dict:
         """
@@ -115,6 +138,23 @@ class RateLimiter:
                 "requests_today": max(0, self.max_per_day - len(self.daily_requests)),
             }
         }
+    
+    def _update_metrics(self):
+        """Update Prometheus metrics with current state"""
+        if not self.metrics:
+            return
+        
+        # Clean up minute requests
+        now = time.time()
+        self.minute_requests = deque([t for t in self.minute_requests if now - t < 60])
+        
+        # Update gauges
+        self.metrics.update_rate_limiter_stats(
+            requests_per_minute=len(self.minute_requests),
+            requests_today=len(self.daily_requests),
+            budget_used_usd=self.daily_cost,
+            budget_remaining_usd=max(0, self.daily_budget_usd - self.daily_cost)
+        )
 
 
 # Global rate limiter instance

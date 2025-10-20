@@ -10,6 +10,8 @@ from pathlib import Path
 
 from .base import CloudCaptionProvider, CloudCaptionResponse
 from .rate_limiter import get_rate_limiter
+from .metrics import get_metrics
+from .tracing import get_tracing
 
 
 class OpenRouterProvider(CloudCaptionProvider):
@@ -37,12 +39,11 @@ class OpenRouterProvider(CloudCaptionProvider):
         self.model = model or os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.rate_limiter = get_rate_limiter()
+        self.metrics = get_metrics()
+        self.tracing = get_tracing()
         
         # Load pricing configuration
         self._load_pricing()
-        
-        print(f"[OpenRouterProvider] Initialized with model: {self.model}")
-        print(f"[OpenRouterProvider] Pricing: ${self.input_cost_per_million}/M input, ${self.output_cost_per_million}/M output")
     
     def _load_pricing(self):
         """Load pricing from YAML config"""
@@ -79,90 +80,150 @@ class OpenRouterProvider(CloudCaptionProvider):
         Raises:
             Exception: If API call fails or rate limit exceeded
         """
-        # Check rate limits
-        estimated_cost = 0.001  # Rough estimate for rate limiter
-        can_proceed, reason = self.rate_limiter.can_proceed(estimated_cost)
-        if not can_proceed:
-            raise Exception(f"Rate limit exceeded: {reason}")
-        
         start = time.time()
+        request_size = len(img_bytes)
         
-        # Encode image to base64
-        img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-        # Detect image format (default to JPEG)
-        img_format = self._detect_format(img_bytes)
-        img_data_uri = f"data:image/{img_format};base64,{img_b64}"
+        # Create parent span for entire caption operation
+        with self.tracing.trace_cloud_caption(
+            provider='openrouter',
+            model=self.model,
+            image_size_bytes=request_size
+        ) as parent_span:
+            # Check rate limits with tracing
+            with self.tracing.trace_rate_limit_check() as rate_span:
+                estimated_cost = 0.001  # Rough estimate for rate limiter
+                can_proceed, reason = self.rate_limiter.can_proceed(estimated_cost)
+                
+                if rate_span:
+                    self.tracing.set_attributes(rate_span, {
+                        'can_proceed': can_proceed,
+                        'estimated_cost_usd': estimated_cost,
+                    })
+                
+                if not can_proceed:
+                    if rate_span:
+                        self.tracing.set_attributes(rate_span, {'block_reason': reason})
+                    raise Exception(f"Rate limit exceeded: {reason}")
+                
+                self.tracing.add_event(rate_span, 'rate_limit_passed')
         
-        # Prepare request
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/yourusername/ImageSearch",  # Optional: helps with rate limits
-            "X-Title": "Image Search AI Router",  # Optional: for OpenRouter dashboard
-        }
+            # Encode image to base64
+            self.tracing.add_event(parent_span, 'encoding_image')
+            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+            # Detect image format (default to JPEG)
+            img_format = self._detect_format(img_bytes)
+            img_data_uri = f"data:image/{img_format};base64,{img_b64}"
+            
+            if parent_span:
+                self.tracing.set_attributes(parent_span, {'image.format': img_format})
         
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Generate a concise, descriptive caption for this image in one sentence. Focus on the main subject and key visual elements. Be specific and detailed."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": img_data_uri}
-                        }
-                    ]
-                }
-            ],
-            "max_tokens": 100,
-            "temperature": 0.7,
-        }
+            # Prepare request
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/yourusername/ImageSearch",  # Optional: helps with rate limits
+                "X-Title": "Image Search AI Router",  # Optional: for OpenRouter dashboard
+            }
+            
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Generate a concise, descriptive caption for this image in one sentence. Focus on the main subject and key visual elements. Be specific and detailed."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": img_data_uri}
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 100,
+                "temperature": 0.7,
+            }
         
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    self.api_url,
-                    headers=headers,
-                    json=payload
+            try:
+                self.tracing.add_event(parent_span, 'api_request_start')
+                
+                with self.metrics.track_request('openrouter'):
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.post(
+                            self.api_url,
+                            headers=headers,
+                            json=payload
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                
+                self.tracing.add_event(parent_span, 'api_response_received')
+                
+                duration_seconds = time.time() - start
+                latency_ms = int(duration_seconds * 1000)
+                response_size = len(response.text) if hasattr(response, 'text') else 0
+            
+                # Parse response
+                caption = data["choices"][0]["message"]["content"].strip()
+                usage = data.get("usage", {})
+                input_tokens = usage.get("prompt_tokens", 0)
+                output_tokens = usage.get("completion_tokens", 0)
+                
+                # Calculate actual cost
+                cost_usd = self.calculate_cost(input_tokens, output_tokens)
+                
+                # Add trace attributes
+                if parent_span:
+                    self.tracing.set_attributes(parent_span, {
+                        'cost_usd': cost_usd,
+                        'input_tokens': input_tokens,
+                        'output_tokens': output_tokens,
+                        'latency_ms': latency_ms,
+                        'caption_length': len(caption),
+                    })
+                    self.tracing.set_status_ok(parent_span)
+            
+                # Record successful request with rate limiter
+                self.rate_limiter.record_request(cost_usd)
+            
+                # Record metrics
+                self.metrics.record_request(
+                    provider='openrouter',
+                    model=self.model,
+                    status='success',
+                    duration_seconds=duration_seconds,
+                    cost_usd=cost_usd,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    request_size_bytes=request_size,
+                    response_size_bytes=response_size,
                 )
-                response.raise_for_status()
-                data = response.json()
-            
-            latency_ms = int((time.time() - start) * 1000)
-            
-            # Parse response
-            caption = data["choices"][0]["message"]["content"].strip()
-            usage = data.get("usage", {})
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
-            
-            # Calculate actual cost
-            cost_usd = self.calculate_cost(input_tokens, output_tokens)
-            
-            # Record successful request with rate limiter
-            self.rate_limiter.record_request(cost_usd)
-            
-            return CloudCaptionResponse(
-                caption=caption,
-                latency_ms=latency_ms,
-                cost_usd=cost_usd,
-                model=self.model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
+                
+                return CloudCaptionResponse(
+                    caption=caption,
+                    latency_ms=latency_ms,
+                    cost_usd=cost_usd,
+                    model=self.model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
         
-        except httpx.HTTPStatusError as e:
-            error_detail = e.response.text
-            print(f"[ERROR] OpenRouter API error: {e.response.status_code} - {error_detail}")
-            raise Exception(f"OpenRouter API error: {e.response.status_code}")
-        
-        except Exception as e:
-            print(f"[ERROR] OpenRouter request failed: {e}")
-            raise
+            except httpx.HTTPStatusError as e:
+                error_detail = e.response.text
+                print(f"[ERROR] OpenRouter API error: {e.response.status_code} - {error_detail}")
+                self.metrics.record_failure('openrouter', self.model, 'http_error')
+                if parent_span:
+                    self.tracing.set_status_error(parent_span, f"HTTP {e.response.status_code}")
+                raise Exception(f"OpenRouter API error: {e.response.status_code}")
+            
+            except Exception as e:
+                print(f"[ERROR] OpenRouter request failed: {e}")
+                self.metrics.record_failure('openrouter', self.model, type(e).__name__)
+                if parent_span:
+                    self.tracing.set_status_error(parent_span, str(e))
+                raise
     
     def calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """

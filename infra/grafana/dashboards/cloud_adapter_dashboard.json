@@ -1,0 +1,355 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "cloud-adapter-metrics",
+    "title": "Cloud Adapter Metrics",
+    "tags": ["cloud", "adapter", "monitoring"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cloud Request Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(cloud_requests_total[1m])",
+            "legendFormat": "{{provider}} - {{model}} - {{status}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"label": "requests/sec", "show": true},
+          {"show": true}
+        ],
+        "xaxis": {"show": true}
+      },
+      {
+        "id": 2,
+        "title": "Total Cloud Requests",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_requests_total)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Success Rate",
+        "type": "gauge",
+        "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(cloud_requests_total{status=\"success\"}[5m])) / sum(rate(cloud_requests_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 90, "color": "yellow"},
+                {"value": 95, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Failed Requests",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 4, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_requests_failed_total)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "auto",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 10, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Requests In Flight",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 4, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_requests_in_flight)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Request Duration (p50, p95, p99)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(cloud_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50 - {{provider}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(cloud_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95 - {{provider}}",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(cloud_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99 - {{provider}}",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"label": "seconds", "show": true},
+          {"show": true}
+        ],
+        "xaxis": {"show": true}
+      },
+      {
+        "id": 7,
+        "title": "Total Cost (USD)",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_cost_total_usd_total)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 6
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Daily Cost",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 8, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_daily_cost_usd)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 4
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Budget Remaining",
+        "type": "gauge",
+        "gridPos": {"x": 12, "y": 12, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(cloud_daily_budget_remaining_usd)",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "min": 0,
+            "max": 10,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 2, "color": "yellow"},
+                {"value": 5, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Token Usage (Input vs Output)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(cloud_tokens_input_total[1m])",
+            "legendFormat": "Input - {{provider}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(cloud_tokens_output_total[1m])",
+            "legendFormat": "Output - {{provider}}",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {"label": "tokens/sec", "show": true},
+          {"show": true}
+        ],
+        "xaxis": {"show": true}
+      },
+      {
+        "id": 11,
+        "title": "Rate Limiter Status",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 16, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "rate_limiter_requests_allowed_total",
+            "legendFormat": "Allowed",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate_limiter_requests_blocked_total)",
+            "legendFormat": "Blocked",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Circuit Breaker State",
+        "type": "stat",
+        "gridPos": {"x": 18, "y": 16, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "circuit_breaker_state",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "options": {"0": {"text": "CLOSED", "color": "green"}}},
+              {"type": "value", "options": {"1": {"text": "OPEN", "color": "red"}}},
+              {"type": "value", "options": {"2": {"text": "HALF_OPEN", "color": "yellow"}}}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"},
+                {"value": 2, "color": "yellow"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Circuit Breaker Events",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(circuit_breaker_success_total[1m])",
+            "legendFormat": "Success",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(circuit_breaker_failure_total[1m])",
+            "legendFormat": "Failure",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(circuit_breaker_rejected_total[1m])",
+            "legendFormat": "Rejected",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"label": "events/sec", "show": true},
+          {"show": true}
+        ],
+        "xaxis": {"show": true}
+      }
+    ]
+  },
+  "overwrite": true
+}
