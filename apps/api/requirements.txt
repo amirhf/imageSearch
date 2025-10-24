@@ -22,4 +22,10 @@ opentelemetry-instrumentation-fastapi==0.48b0
 opentelemetry-exporter-otlp==1.27.0
 python-dotenv==1.0.1
 PyYAML==6.0.2
+tqdm==4.66.1
+# Benchmarking dependencies (optional)
+matplotlib==3.8.2
+seaborn==0.13.0
+pandas==2.1.4
+nltk==3.8.1
 

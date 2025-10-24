@@ -1,6 +1,8 @@
 import os
 from apps.api.storage.pgvector_store import PgVectorStore
 from apps.api.storage.qdrant_store import QdrantStore
+from apps.api.services.image_storage import ImageStorage
+from apps.api.services.local_file_storage import LocalFileStorage
 
 # Try to import real implementations, fall back to mocks if PyTorch unavailable
 USE_MOCK = os.getenv("USE_MOCK_MODELS", "auto").lower()
@@ -33,6 +35,7 @@ else:
 _vector_store = None
 _captioner = None
 _embedder = None
+_image_storage = None
 
 def get_vector_store():
     global _vector_store
@@ -55,3 +58,21 @@ def get_embedder():
     if _embedder is None:
         _embedder = EmbedderClient()
     return _embedder
+
+def get_image_storage() -> ImageStorage:
+    global _image_storage
+    if _image_storage is None:
+        backend = os.getenv("IMAGE_STORAGE_BACKEND", "local").lower()
+        if backend == "local":
+            storage_path = os.getenv("IMAGE_STORAGE_PATH", "./storage/images")
+            thumbnail_size = int(os.getenv("THUMBNAIL_SIZE", "256"))
+            base_url = os.getenv("BASE_URL", "http://localhost:8000")
+            _image_storage = LocalFileStorage(
+                base_path=storage_path,
+                thumbnail_size=thumbnail_size,
+                base_url=base_url
+            )
+        else:
+            # Future: Add S3 support
+            raise ValueError(f"Unsupported storage backend: {backend}")
+    return _image_storage

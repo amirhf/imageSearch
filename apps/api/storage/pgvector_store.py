@@ -15,7 +15,21 @@ with _engine.begin() as conn:
     conn.execute(text("CREATE INDEX IF NOT EXISTS images_vec_hnsw ON images USING hnsw (embed_vector vector_cosine_ops)"))
 
 class PgVectorStore:
-    async def upsert_image(self, image_id: str, caption: str, caption_confidence: float, caption_origin: str, img_vec, payload: dict):
+    async def upsert_image(
+        self, 
+        image_id: str, 
+        caption: str, 
+        caption_confidence: float, 
+        caption_origin: str, 
+        img_vec, 
+        payload: dict,
+        file_path: str = None,
+        format: str = None,
+        size_bytes: int = None,
+        width: int = None,
+        height: int = None,
+        thumbnail_path: str = None
+    ):
         with Session() as s:
             doc = s.get(ImageDoc, image_id) or ImageDoc(id=image_id)
             doc.caption = caption
@@ -23,6 +37,21 @@ class PgVectorStore:
             doc.caption_origin = caption_origin
             doc.embed_vector = img_vec
             doc.payload = payload
+            
+            # Update storage fields if provided
+            if file_path is not None:
+                doc.file_path = file_path
+            if format is not None:
+                doc.format = format
+            if size_bytes is not None:
+                doc.size_bytes = size_bytes
+            if width is not None:
+                doc.width = width
+            if height is not None:
+                doc.height = height
+            if thumbnail_path is not None:
+                doc.thumbnail_path = thumbnail_path
+            
             s.add(doc)
             s.commit()
 
@@ -35,6 +64,12 @@ class PgVectorStore:
                 "confidence": doc.caption_confidence,
                 "origin": doc.caption_origin,
                 "payload": doc.payload,
+                "file_path": doc.file_path,
+                "format": doc.format,
+                "size_bytes": doc.size_bytes,
+                "width": doc.width,
+                "height": doc.height,
+                "thumbnail_path": doc.thumbnail_path,
             }
 
     async def search(self, query_vec, k: int = 10):

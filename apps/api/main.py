@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -12,7 +12,7 @@ from prometheus_client import (
     REGISTRY, PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR
 )
 
-from apps.api.deps import get_vector_store, get_captioner, get_embedder
+from apps.api.deps import get_vector_store, get_captioner, get_embedder, get_image_storage
 from apps.api.routing_policy import should_use_cloud
 
 load_dotenv()
@@ -95,10 +95,13 @@ async def metrics():
         return Response(content=f"Error generating metrics: {str(e)}", status_code=500)
 
 @app.post("/images")
-async def ingest_image(payload: Optional[ImageIn] = None, file: Optional[UploadFile] = File(None)):
+async def ingest_image(
+    file: Optional[UploadFile] = File(None),
+    url: Optional[str] = Form(None)
+):
     import traceback
     try:
-        if not payload and not file:
+        if not file and not url:
             raise HTTPException(400, "Provide either url or file")
 
         # Load bytes
@@ -108,12 +111,16 @@ async def ingest_image(payload: Optional[ImageIn] = None, file: Optional[UploadF
         else:
             import httpx
             async with httpx.AsyncClient(timeout=20) as client:
-                r = await client.get(payload.url)
+                r = await client.get(url)
                 r.raise_for_status()
                 img_bytes = r.content
-            src = {"source": "url", "url": payload.url}
+            src = {"source": "url", "url": url}
 
         image_id = hashlib.sha256(img_bytes).hexdigest()[:16]
+
+        # Save image to storage
+        storage = get_image_storage()
+        img_metadata = await storage.save_image(image_id, img_bytes, generate_thumbnail=True)
 
         # Caption (local first, maybe fallback)
         captioner = get_captioner()
@@ -145,10 +152,27 @@ async def ingest_image(payload: Optional[ImageIn] = None, file: Optional[UploadF
             caption_confidence=conf,
             caption_origin=origin,
             img_vec=img_vec,
-            payload={"src": src}
+            payload={"src": src},
+            file_path=img_metadata.file_path,
+            format=img_metadata.format,
+            size_bytes=img_metadata.size_bytes,
+            width=img_metadata.width,
+            height=img_metadata.height,
+            thumbnail_path=img_metadata.thumbnail_path
         )
 
-        return {"id": image_id, "caption": caption, "origin": origin, "confidence": conf}
+        return {
+            "id": image_id, 
+            "caption": caption, 
+            "origin": origin, 
+            "confidence": conf,
+            "download_url": storage.get_image_url(image_id),
+            "thumbnail_url": storage.get_thumbnail_url(image_id),
+            "width": img_metadata.width,
+            "height": img_metadata.height,
+            "size_bytes": img_metadata.size_bytes,
+            "format": img_metadata.format
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -162,7 +186,63 @@ async def get_image(image_id: str):
     doc = await store.fetch_image(image_id)
     if not doc:
         raise HTTPException(404, "Not found")
+    
+    # Add download URLs
+    storage = get_image_storage()
+    doc["download_url"] = storage.get_image_url(image_id)
+    doc["thumbnail_url"] = storage.get_thumbnail_url(image_id)
+    
     return doc
+
+@app.get("/images/{image_id}/download")
+async def download_image(image_id: str):
+    """Download the original image file"""
+    storage = get_image_storage()
+    img_bytes = await storage.get_image(image_id)
+    
+    if not img_bytes:
+        raise HTTPException(404, "Image not found")
+    
+    # Get format from database for correct content-type
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    img_format = doc.get("format", "jpeg") if doc else "jpeg"
+    
+    # Map format to MIME type
+    mime_types = {
+        "jpeg": "image/jpeg",
+        "jpg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp"
+    }
+    content_type = mime_types.get(img_format, "image/jpeg")
+    
+    return Response(content=img_bytes, media_type=content_type)
+
+@app.get("/images/{image_id}/thumbnail")
+async def download_thumbnail(image_id: str):
+    """Download the thumbnail image"""
+    storage = get_image_storage()
+    thumb_bytes = await storage.get_thumbnail(image_id)
+    
+    if not thumb_bytes:
+        raise HTTPException(404, "Thumbnail not found")
+    
+    # Get format from database
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    img_format = doc.get("format", "jpeg") if doc else "jpeg"
+    
+    # Map format to MIME type
+    mime_types = {
+        "jpeg": "image/jpeg",
+        "jpg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp"
+    }
+    content_type = mime_types.get(img_format, "image/jpeg")
+    
+    return Response(content=thumb_bytes, media_type=content_type)
 
 @app.get("/search")
 async def search(q: str, k: int = 10):
@@ -170,4 +250,13 @@ async def search(q: str, k: int = 10):
     q_vec = await embedder.embed_text(q)
     store = get_vector_store()
     results = await store.search(query_vec=q_vec, k=k)
+    
+    # Add download URLs to each result
+    storage = get_image_storage()
+    for result in results:
+        image_id = result.get('id')
+        if image_id:
+            result['download_url'] = storage.get_image_url(image_id)
+            result['thumbnail_url'] = storage.get_thumbnail_url(image_id)
+    
     return {"query": q, "results": results}

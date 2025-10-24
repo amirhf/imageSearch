@@ -12,3 +12,11 @@ class ImageDoc(Base):
     caption_origin = mapped_column(String(16))
     embed_vector = mapped_column(Vector(512))  # OpenCLIP ViT-B-32 produces 512-dim vectors
     payload = mapped_column(JSON)
+    
+    # Image storage fields
+    file_path = mapped_column(String(512), nullable=True)  # Path to stored image file
+    format = mapped_column(String(16), nullable=True)  # jpeg, png, webp
+    size_bytes = mapped_column(Integer, nullable=True)  # File size in bytes
+    width = mapped_column(Integer, nullable=True)  # Image width in pixels
+    height = mapped_column(Integer, nullable=True)  # Image height in pixels
+    thumbnail_path = mapped_column(String(512), nullable=True)  # Path to thumbnail

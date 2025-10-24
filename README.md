@@ -28,8 +28,10 @@ uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Endpoints
-- `POST /images` – body: `{ url | file }` → returns `{id, caption, tags, vector_info}`
-- `GET /images/{id}` – metadata
+- `POST /images` – body: `{ url | file }` → returns `{id, caption, download_url, thumbnail_url, ...}`
+- `GET /images/{id}` – metadata including download URLs
+- `GET /images/{id}/download` – download original image
+- `GET /images/{id}/thumbnail` – download 256x256 thumbnail
 - `GET /search?q=...` – semantic text→image search; query params: `k`, `backend`
 - `GET /metrics` – Prometheus exposition
 - `GET /healthz` – liveness
@@ -40,11 +42,21 @@ Environment (.env):
 VECTOR_BACKEND=pgvector   # or qdrant
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ai_router
 QDRANT_URL=http://localhost:6333
+
+# Cloud providers
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 ANTHROPIC_API_KEY=
+
+# Routing policy
 CAPTION_CONFIDENCE_THRESHOLD=0.55
 CAPTION_LATENCY_BUDGET_MS=600
+
+# Image storage
+IMAGE_STORAGE_BACKEND=local   # or s3
+IMAGE_STORAGE_PATH=./storage/images
+THUMBNAIL_SIZE=256
+BASE_URL=http://localhost:8000
 ```
 
 ## Run tests
@@ -52,12 +64,41 @@ CAPTION_LATENCY_BUDGET_MS=600
 # Run all CI/CD safe tests
 python tests/test_infrastructure.py
 python tests/test_load.py
+python tests/test_image_storage.py
 
 # Or use pytest
 pytest tests/ -v
 
 # See tests/README.md for more options
 ```
+
+## Dataset Seeding
+Seed the database with real image datasets:
+
+```bash
+# COCO validation set (automatic download)
+python scripts/seed_datasets.py --dataset coco --count 1000
+
+# Unsplash (requires API key)
+python scripts/seed_datasets.py --dataset unsplash --count 500 --api-key YOUR_KEY
+
+# List available datasets
+python scripts/seed_datasets.py --list
+```
+
+## Benchmarking
+Run comprehensive performance benchmarks:
+
+```bash
+cd notebooks
+python benchmark.py --test-image ../test_image.jpg --sample-size 100
+```
+
+Generates:
+- Latency statistics (mean, P95, P99)
+- Cost projections
+- Quality metrics (BLEU, METEOR)
+- Visualization plots
 
 ## Observability
 - Prometheus at http://localhost:9090
