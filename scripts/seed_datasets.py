@@ -33,15 +33,16 @@ class DatasetSeeder:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
-            await self.session.close()
+            await self.session.aclose()
     
     async def ingest_image(self, image_url: str, metadata: Dict) -> Optional[Dict]:
         """Ingest a single image from URL"""
         try:
-            payload = {"url": image_url}
+            # Send as form data with url field
+            form_data = {"url": image_url}
             response = await self.session.post(
                 f"{self.api_url}/images",
-                json=payload
+                data=form_data
             )
             response.raise_for_status()
             result = response.json()

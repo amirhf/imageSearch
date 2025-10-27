@@ -63,6 +63,7 @@ def get_image_storage() -> ImageStorage:
     global _image_storage
     if _image_storage is None:
         backend = os.getenv("IMAGE_STORAGE_BACKEND", "local").lower()
+        
         if backend == "local":
             storage_path = os.getenv("IMAGE_STORAGE_PATH", "./storage/images")
             thumbnail_size = int(os.getenv("THUMBNAIL_SIZE", "256"))
@@ -72,7 +73,42 @@ def get_image_storage() -> ImageStorage:
                 thumbnail_size=thumbnail_size,
                 base_url=base_url
             )
+            print(f"[INFO] Using local file storage: {storage_path}")
+            
+        elif backend in ["s3", "minio"]:
+            from apps.api.services.s3_storage import S3Storage
+            
+            bucket_name = os.getenv("S3_BUCKET_NAME", "imagesearch")
+            endpoint_url = os.getenv("S3_ENDPOINT_URL")
+            access_key = os.getenv("S3_ACCESS_KEY_ID")
+            secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
+            region = os.getenv("S3_REGION", "us-east-1")
+            thumbnail_size = int(os.getenv("THUMBNAIL_SIZE", "256"))
+            use_presigned = os.getenv("S3_USE_PRESIGNED_URLS", "true").lower() == "true"
+            presigned_expiry = int(os.getenv("S3_PRESIGNED_URL_EXPIRY", "3600"))
+            public_url_base = os.getenv("S3_PUBLIC_URL_BASE")
+            
+            # MinIO-specific defaults
+            if backend == "minio":
+                endpoint_url = endpoint_url or "http://localhost:9000"
+                access_key = access_key or "minioadmin"
+                secret_key = secret_key or "minioadmin"
+                print(f"[INFO] Using MinIO storage: {endpoint_url}/{bucket_name}")
+            else:
+                print(f"[INFO] Using S3 storage: {bucket_name} (region: {region})")
+            
+            _image_storage = S3Storage(
+                bucket_name=bucket_name,
+                endpoint_url=endpoint_url,
+                access_key_id=access_key,
+                secret_access_key=secret_key,
+                region_name=region,
+                thumbnail_size=thumbnail_size,
+                public_url_base=public_url_base,
+                use_presigned_urls=use_presigned,
+                presigned_url_expiry=presigned_expiry
+            )
         else:
-            # Future: Add S3 support
             raise ValueError(f"Unsupported storage backend: {backend}")
+    
     return _image_storage

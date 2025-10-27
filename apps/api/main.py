@@ -161,13 +161,14 @@ async def ingest_image(
             thumbnail_path=img_metadata.thumbnail_path
         )
 
+        base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
         return {
             "id": image_id, 
             "caption": caption, 
             "origin": origin, 
             "confidence": conf,
-            "download_url": storage.get_image_url(image_id),
-            "thumbnail_url": storage.get_thumbnail_url(image_id),
+            "download_url": f"{base_url}/images/{image_id}/download",
+            "thumbnail_url": f"{base_url}/images/{image_id}/thumbnail",
             "width": img_metadata.width,
             "height": img_metadata.height,
             "size_bytes": img_metadata.size_bytes,
@@ -187,10 +188,10 @@ async def get_image(image_id: str):
     if not doc:
         raise HTTPException(404, "Not found")
     
-    # Add download URLs
-    storage = get_image_storage()
-    doc["download_url"] = storage.get_image_url(image_id)
-    doc["thumbnail_url"] = storage.get_thumbnail_url(image_id)
+    # Add API download URLs
+    base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+    doc["download_url"] = f"{base_url}/images/{image_id}/download"
+    doc["thumbnail_url"] = f"{base_url}/images/{image_id}/thumbnail"
     
     return doc
 
@@ -251,12 +252,12 @@ async def search(q: str, k: int = 10):
     store = get_vector_store()
     results = await store.search(query_vec=q_vec, k=k)
     
-    # Add download URLs to each result
-    storage = get_image_storage()
+    # Add API download URLs to each result (avoid direct storage URLs)
+    base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
     for result in results:
-        image_id = result.get('id')
+        image_id = result.get("id")
         if image_id:
-            result['download_url'] = storage.get_image_url(image_id)
-            result['thumbnail_url'] = storage.get_thumbnail_url(image_id)
+            result["download_url"] = f"{base_url}/images/{image_id}/download"
+            result["thumbnail_url"] = f"{base_url}/images/{image_id}/thumbnail"
     
     return {"query": q, "results": results}

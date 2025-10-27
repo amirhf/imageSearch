@@ -14,6 +14,14 @@ uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 # open http://localhost:8000/docs to upload an image and run /search
 ```
 
+## Storage Options
+- **Local** - Files stored on disk (default, zero setup)
+- **MinIO** - S3-compatible, runs in Docker (dev/self-hosted)
+- **Cloudflare R2** - Zero egress fees, $1.50/month for 100GB (production)
+- **AWS S3** - Industry standard with CloudFront CDN
+
+See [S3_STORAGE_SETUP.md](S3_STORAGE_SETUP.md) for complete setup guide.
+
 ## Architecture
 - **FastAPI** gateway exposes `/images`, `/search`, `/metrics`
 - **Captioner**: local **BLIP** first; **cloud** fallback (OpenAI/Gemini/Anthropic) via adapter
@@ -53,10 +61,16 @@ CAPTION_CONFIDENCE_THRESHOLD=0.55
 CAPTION_LATENCY_BUDGET_MS=600
 
 # Image storage
-IMAGE_STORAGE_BACKEND=local   # or s3
-IMAGE_STORAGE_PATH=./storage/images
+IMAGE_STORAGE_BACKEND=local   # local, minio, or s3
+IMAGE_STORAGE_PATH=./storage/images  # For local backend
 THUMBNAIL_SIZE=256
 BASE_URL=http://localhost:8000
+
+# S3-Compatible Storage (MinIO/Cloudflare R2/AWS S3)
+S3_BUCKET_NAME=imagesearch
+S3_ENDPOINT_URL=http://localhost:9000  # MinIO or R2/S3 endpoint
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
 ```
 
 ## Run tests
