@@ -48,3 +48,16 @@ test_data/*.jpeg
 
 # Logs
 *.log
+/apps/ui/.env.local
+
+# Next.js app (apps/ui) generated files
+/apps/ui/.next/
+/apps/ui/node_modules/
+/apps/ui/out/
+/apps/ui/.vercel/
+/apps/ui/.eslintcache
+/apps/ui/.turbo/
+/apps/ui/npm-debug.log*
+/apps/ui/yarn-error.log*
+/apps/ui/pnpm-debug.log*
+/apps/ui/.swc/
