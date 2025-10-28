@@ -28,6 +28,13 @@ export default function HomeClient() {
     <main className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Gallery</h1>
+        <a
+          href="/upload"
+          className="rounded-md border px-3 py-2 text-sm hover:bg-neutral-50"
+          aria-label="Go to upload page"
+        >
+          Upload
+        </a>
       </div>
 
       <SearchBar />
