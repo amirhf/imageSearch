@@ -107,7 +107,6 @@ Run comprehensive performance benchmarks:
 cd notebooks
 python benchmark.py --test-image ../test_image.jpg --sample-size 100
 ```
-
 Generates:
 - Latency statistics (mean, P95, P99)
 - Cost projections
@@ -121,6 +120,57 @@ Generates:
 
 ## ADRs
 See `docs/adr/0001-routing-policy.md` for "Local‑first with Confidence & SLO Overrides".
+
+## Frontend (Next.js UI)
+Path: `apps/ui/`
+
+- **Stack**: Next.js 16 (App Router), React 18, TypeScript, Tailwind CSS, TanStack Query
+- **Features**: Search gallery, Upload (URL or file) with progress, Image detail page, Metrics dashboard
+- **Default port**: `3100`
+
+### Prerequisites
+- Node.js 18+ (recommended 20+)
+- Backend API running (default `http://localhost:8000`)
+
+### Setup & Run (Dev)
+```bash
+cd apps/ui
+cp .env.local.example .env.local   # ensure NEXT_PUBLIC_API_BASE=http://localhost:8000
+npm install
+npm run dev   # http://localhost:3100
+```
+### Build & Start (Prod)
+```bash
+cd apps/ui
+npm run build
+npm run start   # http://localhost:3100
+```
+### Important environment
+- `NEXT_PUBLIC_API_BASE` (UI → API base URL), defaults to `http://localhost:8000` in `.env.local.example`.
+
+### UI routes
+- `/` – Search page (query by text, shows local/cloud origin badges)
+- `/upload` – Drag & drop or paste URL; shows progress; redirects to detail
+- `/image/[id]` – Image detail (caption, origin, metadata, "Find similar")
+- `/metrics` – Metrics dashboard (p50/p95, local vs cloud split, cost, cache hits)
+
+### API proxy routes (UI → Backend)
+- `GET /api/search` → `${NEXT_PUBLIC_API_BASE}/search`
+- `GET /api/images/[id]` → `${NEXT_PUBLIC_API_BASE}/images/{id}`
+- `POST /api/images` → `${NEXT_PUBLIC_API_BASE}/images` (file or url)
+- `GET /api/metrics/summary` → parses `${NEXT_PUBLIC_API_BASE}/metrics` into a compact JSON summary
+
+### Troubleshooting
+- Hydration warnings from extensions: we set `suppressHydrationWarning` on `<body>`.
+- Dev over LAN (192.168.x.x) may show an "allowedDevOrigins" warning; add to `apps/ui/next.config.mjs` if needed:
+  ```js
+  const nextConfig = {
+    images: { unoptimized: true },
+    allowedDevOrigins: ['http://192.168.70.10:3100']
+  }
+  export default nextConfig
+  ```
+- Tailwind warning about `@tailwindcss/line-clamp`: remove the plugin from `tailwind.config.ts` (included by default in v3.3+).
 
 ## License
 MIT (sample) – replace or update as you prefer.
