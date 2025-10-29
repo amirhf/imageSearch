@@ -12,7 +12,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body className="min-h-screen bg-neutral-50 text-neutral-900" suppressHydrationWarning>
         <Providers>
-          <div className="mx-auto max-w-7xl p-4">{children}</div>
+          <div className="mx-auto max-w-7xl p-4">
+            <header className="mb-6 flex items-center justify-between">
+              <a href="/" className="text-sm font-medium hover:underline" aria-label="Go to home">Image Search</a>
+              <nav className="flex items-center gap-3 text-sm">
+                <a href="/" className="hover:underline">Home</a>
+                <a href="/upload" className="hover:underline">Upload</a>
+                <a href="/metrics" className="hover:underline">Metrics</a>
+              </nav>
+            </header>
+            {children}
+          </div>
         </Providers>
       </body>
     </html>
