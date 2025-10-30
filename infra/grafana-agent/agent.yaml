@@ -1,0 +1,22 @@
+server:
+  log_level: info
+
+metrics:
+  wal_directory: /var/lib/grafana-agent/data
+  global:
+    scrape_interval: 15s
+    external_labels:
+      service: imagesearch-api
+
+  scrape_configs:
+    - job_name: imagesearch-api
+      scheme: ${API_METRICS_SCHEME:https}
+      metrics_path: /metrics
+      static_configs:
+        - targets: ["${API_METRICS_HOST:api.example.com}"]
+
+  remote_write:
+    - url: ${GRAFANA_REMOTE_WRITE_URL:https://prometheus-prod-01.grafana.net/api/prom/push}
+      basic_auth:
+        username: ${GRAFANA_USERNAME:123456}
+        password: ${GRAFANA_PASSWORD:grafana_api_key}

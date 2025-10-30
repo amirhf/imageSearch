@@ -1,0 +1,5 @@
+# Heavy model runtime dependencies (only needed when USE_MOCK_MODELS=false)
+transformers==4.45.2
+torch==2.4.0
+torchvision==0.19.0
+open-clip-torch==2.26.1
