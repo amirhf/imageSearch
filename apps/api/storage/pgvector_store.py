@@ -4,15 +4,51 @@ from sqlalchemy.orm import sessionmaker
 from apps.api.storage.models import Base, ImageDoc
 import numpy as np
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/ai_router")
-_engine = create_engine(DATABASE_URL)
-Session = sessionmaker(bind=_engine)
+# Lazily initialized globals to avoid failing at import time if DB is unreachable
+_engine = None
+Session = None
+_initialized = False
 
-# Initialize schema
-with _engine.begin() as conn:
-    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.create_all(bind=conn)
-    conn.execute(text("CREATE INDEX IF NOT EXISTS images_vec_hnsw ON images USING hnsw (embed_vector vector_cosine_ops)"))
+
+def _init_db():
+    """Initialize engine, session, and schema on first use."""
+    global _engine, Session, _initialized
+    if _initialized:
+        return
+
+    # Read DATABASE_URL at runtime (Cloud Run env)
+    db_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://postgres:postgres@localhost:5432/ai_router",
+    )
+
+    # Create engine with pre_ping for resilient connections
+    _engine = create_engine(db_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=_engine)
+
+    # Initialize schema and index; tolerate extension/index creation errors gracefully
+    try:
+        with _engine.begin() as conn:
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except Exception as e:
+                print(f"[WARN] Could not create pgvector extension: {e}")
+
+            Base.metadata.create_all(bind=conn)
+
+            try:
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS images_vec_hnsw ON images USING hnsw (embed_vector vector_cosine_ops)"
+                    )
+                )
+            except Exception as e:
+                print(f"[WARN] Could not create HNSW index: {e}")
+    except Exception as e:
+        # Defer hard failure to actual DB operations so the app can start and expose /healthz
+        print(f"[ERROR] Database initialization failed: {e}")
+
+    _initialized = True
 
 class PgVectorStore:
     async def upsert_image(
@@ -30,6 +66,7 @@ class PgVectorStore:
         height: int = None,
         thumbnail_path: str = None
     ):
+        _init_db()
         with Session() as s:
             doc = s.get(ImageDoc, image_id) or ImageDoc(id=image_id)
             doc.caption = caption
@@ -56,6 +93,7 @@ class PgVectorStore:
             s.commit()
 
     async def fetch_image(self, image_id: str):
+        _init_db()
         with Session() as s:
             doc = s.get(ImageDoc, image_id)
             return None if not doc else {
@@ -80,6 +118,7 @@ class PgVectorStore:
             query_vec = query_vec.tolist()
         
         # Simple approach: use ORM with SQLAlchemy
+        _init_db()
         with Session() as s:
             # Build vector string for pgvector
             vec_str = str(query_vec)

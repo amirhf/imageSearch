@@ -1,0 +1,13 @@
+# Cloud Build config to build API image from non-root Dockerfile
+# Usage:
+#   gcloud builds submit \
+#     --config cloudbuild-api.yaml \
+#     --substitutions=_IMAGE=us-east1-docker.pkg.dev/PROJECT_ID/imagesearch/imagesearch-api:latest \
+#     .
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'apps/api/Dockerfile', '-t', '$_IMAGE', '.']
+
+images:
+  - '$_IMAGE'

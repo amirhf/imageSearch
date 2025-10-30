@@ -25,4 +25,5 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 
 # Cloud Run provides $PORT. Default to 8000 locally.
-CMD ["sh", "-c", "uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Use python -m and --app-dir to ensure import path resolution.
+CMD ["sh", "-c", "python -m uvicorn apps.api.main:app --app-dir /app --host 0.0.0.0 --port ${PORT:-8000}"]
