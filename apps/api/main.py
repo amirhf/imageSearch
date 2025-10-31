@@ -7,6 +7,7 @@ import io
 import hashlib
 import os
 from dotenv import load_dotenv
+import logging
 from prometheus_client import (
     Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST,
     REGISTRY, PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR
@@ -32,6 +33,11 @@ except Exception:
 ROUTED_LOCAL = Counter("router_local_total", "Local caption route count")
 ROUTED_CLOUD = Counter("router_cloud_total", "Cloud caption route count")
 LATENCY = Histogram("request_latency_ms", "Request latency (ms)", buckets=(50,100,200,400,800,1600,3200))
+
+# Configure basic logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL)
+logger = logging.getLogger("imagesearch")
 
 
 @asynccontextmanager
@@ -63,8 +69,21 @@ app = FastAPI(title="AI Feature Router", version="0.1.0", lifespan=lifespan)
 class ImageIn(BaseModel):
     url: Optional[str] = None
 
-@app.get("/healthz")
+@app.get("/", include_in_schema=False)
+def root():
+    return {"status": "ok"}
+
+@app.get("/healthz", include_in_schema=False)
 def healthz():
+    return {"status": "ok"}
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
+
+@app.get("/_ah/health", include_in_schema=False)
+def gcp_health():
+    # Common GCP health endpoint
     return {"status": "ok"}
 
 async def _generate_metrics_async():
@@ -120,30 +139,49 @@ async def ingest_image(
 
         # Save image to storage
         storage = get_image_storage()
-        img_metadata = await storage.save_image(image_id, img_bytes, generate_thumbnail=True)
 
         # Caption (local first, maybe fallback)
         captioner = get_captioner()
         local_caption, conf, local_ms = await captioner.caption(img_bytes)
 
+        # Evaluate routing
         use_cloud = should_use_cloud(confidence=conf, local_latency_ms=local_ms)
+        try:
+            conf_t = float(os.getenv("CAPTION_CONFIDENCE_THRESHOLD", 0.55))
+            budget_ms = int(os.getenv("CAPTION_LATENCY_BUDGET_MS", 600))
+        except Exception:
+            conf_t, budget_ms = 0.55, 600
+        logger.info(
+            f"routing_decision: conf={conf:.3f} (thr={conf_t}), local_ms={local_ms} (budget={budget_ms}), use_cloud={use_cloud}",
+            extra={"confidence": conf, "local_latency_ms": local_ms, "budget_ms": budget_ms}
+        )
+
         caption = local_caption
         origin = "local"
 
         if use_cloud:
+            logger.info("routing: attempting cloud caption", extra={"use_cloud": use_cloud})
             cloud_caption, cloud_ms, cost_usd = await captioner.caption_cloud(img_bytes)
             if cloud_caption:
                 caption = cloud_caption
                 origin = "cloud"
                 ROUTED_CLOUD.inc()
+                logger.info(
+                    f"routing: cloud_success latency_ms={cloud_ms} cost_usd={cost_usd}",
+                    extra={"cloud_latency_ms": cloud_ms, "cost_usd": cost_usd}
+                )
             else:
                 ROUTED_LOCAL.inc()  # fallback failed → keep local
+                logger.warning("routing: cloud_fallback_failed; using local caption", extra={"use_cloud": use_cloud})
         else:
             ROUTED_LOCAL.inc()
 
         # Embeddings (image + caption text)
         embedder = get_embedder()
         img_vec = await embedder.embed_image(img_bytes)
+
+        # Persist image and thumbnail to configured storage
+        img_metadata = await storage.save_image(image_id=image_id, image_bytes=img_bytes, generate_thumbnail=True)
 
         store = get_vector_store()
         await store.upsert_image(
