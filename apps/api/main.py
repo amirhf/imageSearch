@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import io
 import hashlib
 import os
+import time
 from dotenv import load_dotenv
 import logging
 from prometheus_client import (
@@ -120,6 +121,7 @@ async def ingest_image(
 ):
     import traceback
     try:
+        t0 = time.time()
         if not file and not url:
             raise HTTPException(400, "Provide either url or file")
 
@@ -218,6 +220,11 @@ async def ingest_image(
         print(f"ERROR in ingest_image: {e}")
         traceback.print_exc()
         raise HTTPException(500, f"Internal error: {str(e)}")
+    finally:
+        try:
+            LATENCY.observe(max(1.0, (time.time() - t0) * 1000.0))
+        except Exception:
+            pass
 
 @app.get("/images/{image_id}")
 async def get_image(image_id: str):
@@ -226,10 +233,10 @@ async def get_image(image_id: str):
     if not doc:
         raise HTTPException(404, "Not found")
     
-    # Add API download URLs
-    base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
-    doc["download_url"] = f"{base_url}/images/{image_id}/download"
-    doc["thumbnail_url"] = f"{base_url}/images/{image_id}/thumbnail"
+    # Prefer direct storage URLs (presigned/public) for performance
+    storage = get_image_storage()
+    doc["download_url"] = storage.get_image_url(image_id)
+    doc["thumbnail_url"] = storage.get_thumbnail_url(image_id)
     
     return doc
 
@@ -285,17 +292,24 @@ async def download_thumbnail(image_id: str):
 
 @app.get("/search")
 async def search(q: str, k: int = 10):
+    t0 = time.time()
     embedder = get_embedder()
     q_vec = await embedder.embed_text(q)
     store = get_vector_store()
-    results = await store.search(query_vec=q_vec, k=k)
+    results = await store.search(query_vec=q_vec, k=k, text_query=q)
     
-    # Add API download URLs to each result (avoid direct storage URLs)
-    base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+    # Add direct storage URLs for fast client rendering
+    storage = get_image_storage()
     for result in results:
         image_id = result.get("id")
         if image_id:
-            result["download_url"] = f"{base_url}/images/{image_id}/download"
-            result["thumbnail_url"] = f"{base_url}/images/{image_id}/thumbnail"
+            result["download_url"] = storage.get_image_url(image_id)
+            result["thumbnail_url"] = storage.get_thumbnail_url(image_id)
     
-    return {"query": q, "results": results}
+    try:
+        return {"query": q, "results": results}
+    finally:
+        try:
+            LATENCY.observe(max(1.0, (time.time() - t0) * 1000.0))
+        except Exception:
+            pass

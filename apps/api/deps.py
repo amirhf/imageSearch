@@ -4,33 +4,102 @@ from apps.api.storage.qdrant_store import QdrantStore
 from apps.api.services.image_storage import ImageStorage
 from apps.api.services.local_file_storage import LocalFileStorage
 
-# Try to import real implementations, fall back to mocks if PyTorch unavailable
+# Global defaults
 USE_MOCK = os.getenv("USE_MOCK_MODELS", "auto").lower()
+
+# Component overrides (hybrid support)
+USE_REAL_EMBEDDER = os.getenv("USE_REAL_EMBEDDER", "auto").lower()
+USE_REAL_CAPTIONER = os.getenv("USE_REAL_CAPTIONER", "auto").lower()
 
 CaptionerClient = None
 EmbedderClient = None
 
-if USE_MOCK == "true":
-    print("[INFO] USE_MOCK_MODELS=true, using mock implementations")
-    from apps.api.services.captioner_client_mock import CaptionerClient
-    from apps.api.services.embedder_client_mock import EmbedderClient
-elif USE_MOCK == "false":
-    print("[INFO] USE_MOCK_MODELS=false, using real PyTorch models")
-    from apps.api.services.captioner_client import CaptionerClient
-    from apps.api.services.embedder_client import EmbedderClient
-else:
-    # Auto-detect: try real, fall back to mock
+def _select_captioner_class():
+    # Explicit overrides first
+    if USE_REAL_CAPTIONER == "true":
+        try:
+            from apps.api.services.captioner_client import CaptionerClient as RealCaptioner
+            print("[INFO] Captioner: using REAL")
+            return RealCaptioner
+        except Exception as e:
+            print(f"[WARN] Captioner REAL requested but unavailable: {e}. Falling back to MOCK")
+            from apps.api.services.captioner_client_mock import CaptionerClient as MockCaptioner
+            return MockCaptioner
+    if USE_REAL_CAPTIONER == "false":
+        from apps.api.services.captioner_client_mock import CaptionerClient as MockCaptioner
+        print("[INFO] Captioner: forced MOCK")
+        return MockCaptioner
+
+    # Otherwise, use global USE_MOCK strategy
+    if USE_MOCK == "true":
+        from apps.api.services.captioner_client_mock import CaptionerClient as MockCaptioner
+        print("[INFO] Captioner: MOCK (USE_MOCK_MODELS=true)")
+        return MockCaptioner
+    if USE_MOCK == "false":
+        try:
+            from apps.api.services.captioner_client import CaptionerClient as RealCaptioner
+            print("[INFO] Captioner: REAL (USE_MOCK_MODELS=false)")
+            return RealCaptioner
+        except Exception as e:
+            print(f"[WARN] Captioner REAL requested but unavailable: {e}. Falling back to MOCK")
+            from apps.api.services.captioner_client_mock import CaptionerClient as MockCaptioner
+            return MockCaptioner
+
+    # Auto-detect
     try:
-        # Test if we can actually use torch
         import torch
-        torch.tensor([1.0])  # Quick test
-        from apps.api.services.captioner_client import CaptionerClient
-        from apps.api.services.embedder_client import EmbedderClient
-        print("[INFO] PyTorch available, using real models")
+        torch.tensor([1.0])
+        from apps.api.services.captioner_client import CaptionerClient as RealCaptioner
+        print("[INFO] Captioner: REAL (auto)")
+        return RealCaptioner
     except Exception as e:
-        print(f"[WARN] PyTorch unavailable ({e}), using mock implementations")
-        from apps.api.services.captioner_client_mock import CaptionerClient
-        from apps.api.services.embedder_client_mock import EmbedderClient
+        print(f"[INFO] Captioner: MOCK (auto, {e})")
+        from apps.api.services.captioner_client_mock import CaptionerClient as MockCaptioner
+        return MockCaptioner
+
+
+def _select_embedder_class():
+    # Explicit overrides first
+    if USE_REAL_EMBEDDER == "true":
+        try:
+            from apps.api.services.embedder_client import EmbedderClient as RealEmbedder
+            print("[INFO] Embedder: using REAL")
+            return RealEmbedder
+        except Exception as e:
+            print(f"[WARN] Embedder REAL requested but unavailable: {e}. Falling back to MOCK")
+            from apps.api.services.embedder_client_mock import EmbedderClient as MockEmbedder
+            return MockEmbedder
+    if USE_REAL_EMBEDDER == "false":
+        from apps.api.services.embedder_client_mock import EmbedderClient as MockEmbedder
+        print("[INFO] Embedder: forced MOCK")
+        return MockEmbedder
+
+    # Otherwise, use global USE_MOCK strategy
+    if USE_MOCK == "true":
+        from apps.api.services.embedder_client_mock import EmbedderClient as MockEmbedder
+        print("[INFO] Embedder: MOCK (USE_MOCK_MODELS=true)")
+        return MockEmbedder
+    if USE_MOCK == "false":
+        try:
+            from apps.api.services.embedder_client import EmbedderClient as RealEmbedder
+            print("[INFO] Embedder: REAL (USE_MOCK_MODELS=false)")
+            return RealEmbedder
+        except Exception as e:
+            print(f"[WARN] Embedder REAL requested but unavailable: {e}. Falling back to MOCK")
+            from apps.api.services.embedder_client_mock import EmbedderClient as MockEmbedder
+            return MockEmbedder
+
+    # Auto-detect
+    try:
+        import torch
+        torch.tensor([1.0])
+        from apps.api.services.embedder_client import EmbedderClient as RealEmbedder
+        print("[INFO] Embedder: REAL (auto)")
+        return RealEmbedder
+    except Exception as e:
+        print(f"[INFO] Embedder: MOCK (auto, {e})")
+        from apps.api.services.embedder_client_mock import EmbedderClient as MockEmbedder
+        return MockEmbedder
 
 _vector_store = None
 _captioner = None
@@ -50,13 +119,15 @@ def get_vector_store():
 def get_captioner():
     global _captioner
     if _captioner is None:
-        _captioner = CaptionerClient()
+        cls = _select_captioner_class()
+        _captioner = cls()
     return _captioner
 
 def get_embedder():
     global _embedder
     if _embedder is None:
-        _embedder = EmbedderClient()
+        cls = _select_embedder_class()
+        _embedder = cls()
     return _embedder
 
 def get_image_storage() -> ImageStorage:

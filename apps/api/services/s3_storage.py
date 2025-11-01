@@ -5,7 +5,7 @@ Works with AWS S3, Cloudflare R2, MinIO, and other S3-compatible services.
 import os
 import io
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageOps
 import asyncio
 import boto3
 from botocore.exceptions import ClientError
@@ -109,11 +109,22 @@ class S3Storage(ImageStorage):
         generate_thumbnail: bool = True
     ) -> ImageMetadata:
         """Save image to S3 and generate thumbnail"""
-        # Detect format and dimensions
+        # Detect format and dimensions (EXIF-correct orientation)
         img = Image.open(io.BytesIO(image_bytes))
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
         format_str = img.format.lower() if img.format else 'jpeg'
         width, height = img.size
-        size_bytes = len(image_bytes)
+        # Re-encode EXIF-corrected image for storage
+        orig_buffer = io.BytesIO()
+        save_kwargs = {}
+        if format_str in ('jpeg', 'jpg'):
+            save_kwargs = {"quality": 95, "optimize": True}
+        img.save(orig_buffer, format=format_str.upper(), **save_kwargs)
+        orig_bytes = orig_buffer.getvalue()
+        size_bytes = len(orig_bytes)
         
         # Determine content type
         content_type_map = {
@@ -124,7 +135,7 @@ class S3Storage(ImageStorage):
         }
         content_type = content_type_map.get(format_str, 'image/jpeg')
         
-        # Save original image to S3
+        # Save original (EXIF-corrected) image to S3
         object_key = self._get_object_key(image_id) + f".{format_str}"
         
         loop = asyncio.get_event_loop()
@@ -133,7 +144,7 @@ class S3Storage(ImageStorage):
             lambda: self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=object_key,
-                Body=image_bytes,
+                Body=orig_bytes,
                 ContentType=content_type,
                 Metadata={
                     'width': str(width),
@@ -165,7 +176,7 @@ class S3Storage(ImageStorage):
         format_str: str
     ) -> str:
         """Generate and save thumbnail to S3"""
-        # Create thumbnail
+        # Create thumbnail (use EXIF-corrected image)
         thumb = img.copy()
         thumb.thumbnail((self.thumbnail_size, self.thumbnail_size), Image.Resampling.LANCZOS)
         

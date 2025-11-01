@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { API_BASE } from '@/lib/config'
+import { API_BASE as API_BASE_FROM_CFG } from '@/lib/config'
 import { parsePrometheusText, histogramQuantile, sumMetric } from '@/lib/utils/prometheus'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function GET(_req: NextRequest) {
   try {
-    const r = await fetch(`${API_BASE}/metrics`, { cache: 'no-store' })
-    if (!r.ok) return NextResponse.json({ error: 'Upstream metrics fetch failed' }, { status: 502 })
+    const base = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, '') || API_BASE_FROM_CFG
+    if (!base || base.startsWith('http://localhost')) {
+      return NextResponse.json(
+        { error: 'API base not configured for production', hint: 'Set NEXT_PUBLIC_API_BASE to your Cloud Run URL' },
+        { status: 500 }
+      )
+    }
+
+    const upstream = `${base}/metrics`
+    const r = await fetch(upstream, { cache: 'no-store', headers: { accept: 'text/plain' } })
     const text = await r.text()
+    if (!r.ok) {
+      return NextResponse.json(
+        { error: 'Upstream metrics fetch failed', status: r.status, upstream },
+        { status: 502 }
+      )
+    }
     const samples = parsePrometheusText(text)
 
     // Latency quantiles from histogram buckets (best-effort name detection)

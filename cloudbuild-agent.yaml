@@ -1,0 +1,13 @@
+# Cloud Build config to build Grafana Agent image from infra/grafana-agent/Dockerfile
+# Usage:
+#   gcloud builds submit \
+#     --config cloudbuild-agent.yaml \
+#     --substitutions=_IMAGE=us-east1-docker.pkg.dev/PROJECT_ID/imagesearch/grafana-agent:latest \
+#     .
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'infra/grafana-agent/Dockerfile', '-t', '$_IMAGE', '.']
+
+images:
+  - '$_IMAGE'

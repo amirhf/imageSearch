@@ -110,7 +110,7 @@ class PgVectorStore:
                 "thumbnail_path": doc.thumbnail_path,
             }
 
-    async def search(self, query_vec, k: int = 10):
+    async def search(self, query_vec, k: int = 10, text_query: str = None):
         # Convert numpy array to list if needed
         if hasattr(query_vec, 'tolist'):
             query_vec = query_vec.tolist()
@@ -122,17 +122,42 @@ class PgVectorStore:
         with Session() as s:
             # Build vector string for pgvector
             vec_str = str(query_vec)
-            
-            # Use text SQL with proper vector casting
-            q = text("""
-                SELECT id, caption, caption_confidence, caption_origin,
-                       1 - (embed_vector <=> CAST(:qvec AS vector)) AS score
-                FROM images
-                ORDER BY embed_vector <=> CAST(:qvec AS vector)
-                LIMIT :k
-            """)
-            rows = s.execute(q, {"qvec": vec_str, "k": k}).fetchall()
-            return [
-                {"id": r.id, "caption": r.caption, "score": float(r.score)}
-                for r in rows
-            ]
+
+            # Optional hybrid boosting using caption substring match
+            hybrid = os.getenv("HYBRID_TEXT_BOOST", "true").lower() == "true" and bool(text_query)
+            try:
+                boost_w = float(os.getenv("HYBRID_TEXT_WEIGHT", "0.2"))
+            except Exception:
+                boost_w = 0.2
+
+            if hybrid:
+                q = text("""
+                    SELECT id, caption, caption_confidence, caption_origin,
+                           (1 - (embed_vector <=> CAST(:qvec AS vector))) AS vec_score,
+                           CASE WHEN lower(caption) LIKE '%' || :qterm || '%' THEN :boost ELSE 0 END AS text_boost,
+                           ((1 - (embed_vector <=> CAST(:qvec AS vector))) +
+                            CASE WHEN lower(caption) LIKE '%' || :qterm || '%' THEN :boost ELSE 0 END) AS score
+                    FROM images
+                    ORDER BY score DESC
+                    LIMIT :k
+                """)
+                params = {"qvec": vec_str, "qterm": str(text_query).strip().lower(), "boost": boost_w, "k": k}
+                rows = s.execute(q, params).fetchall()
+                return [
+                    {"id": r.id, "caption": r.caption, "score": float(r.score)}
+                    for r in rows
+                ]
+            else:
+                # Pure vector search (cosine similarity)
+                q = text("""
+                    SELECT id, caption, caption_confidence, caption_origin,
+                           1 - (embed_vector <=> CAST(:qvec AS vector)) AS score
+                    FROM images
+                    ORDER BY embed_vector <=> CAST(:qvec AS vector)
+                    LIMIT :k
+                """)
+                rows = s.execute(q, {"qvec": vec_str, "k": k}).fetchall()
+                return [
+                    {"id": r.id, "caption": r.caption, "score": float(r.score)}
+                    for r in rows
+                ]

@@ -1,0 +1,6 @@
+# Real embedder-only dependencies for hybrid mode (CPU)
+# Base requirements are installed from requirements.base.txt
+# This file installs only what the embedder needs (no transformers/BLIP)
+open-clip-torch==2.26.1
+torch==2.4.0
+torchvision==0.19.0

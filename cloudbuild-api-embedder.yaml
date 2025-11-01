@@ -1,0 +1,13 @@
+# Build the API image with embedder-only deps (Torch CPU + open-clip)
+# Usage:
+#   gcloud builds submit \
+#     --config cloudbuild-api-embedder.yaml \
+#     --substitutions=_IMAGE=us-east1-docker.pkg.dev/PROJECT_ID/imagesearch/imagesearch-api:embedder \
+#     .
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'apps/api/Dockerfile', '--build-arg', 'INSTALL_EMBEDDER=true', '-t', '$_IMAGE', '.']
+
+images:
+  - '$_IMAGE'

@@ -2,7 +2,10 @@
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 
 # Use repository root as workdir so imports like `apps.api.main` resolve
 WORKDIR /app
@@ -15,6 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install light requirements (no Torch)
 COPY apps/api/requirements.base.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Optional: install embedder-only deps for hybrid mode (Torch + open-clip)
+ARG INSTALL_EMBEDDER=false
+COPY apps/api/requirements.embedder.txt /app/requirements.embedder.txt
+RUN if [ "$INSTALL_EMBEDDER" = "true" ]; then \
+      pip install --no-cache-dir -r /app/requirements.embedder.txt ; \
+    fi
 
 # Copy full repository (needed for package path `apps.api.*`)
 COPY . /app
