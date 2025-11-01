@@ -7,10 +7,16 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(_req: NextRequest) {
   try {
-    const base = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, '') || API_BASE_FROM_CFG
+    const base = (process.env.METRICS_API_BASE || process.env.NEXT_PUBLIC_API_BASE || API_BASE_FROM_CFG).replace(/\/$/, '')
     if (!base || base.startsWith('http://localhost')) {
       return NextResponse.json(
         { error: 'API base not configured for production', hint: 'Set NEXT_PUBLIC_API_BASE to your Cloud Run URL' },
+        { status: 500 }
+      )
+    }
+    if (/vercel\.app$/i.test(base)) {
+      return NextResponse.json(
+        { error: 'API base points to Vercel, not your API', hint: 'Set NEXT_PUBLIC_API_BASE (or METRICS_API_BASE) to your Cloud Run URL' },
         { status: 500 }
       )
     }
