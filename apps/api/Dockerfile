@@ -13,6 +13,7 @@ WORKDIR /app
 # System deps (build-essential sometimes needed for psycopg extras)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
   && rm -rf /var/lib/apt/lists/*
 
 # Install light requirements (no Torch)
@@ -22,8 +23,9 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Optional: install embedder-only deps for hybrid mode (Torch + open-clip)
 ARG INSTALL_EMBEDDER=false
 COPY apps/api/requirements.embedder.txt /app/requirements.embedder.txt
+COPY apps/api/requirements.models.txt /app/requirements.models.txt
 RUN if [ "$INSTALL_EMBEDDER" = "true" ]; then \
-      pip install --no-cache-dir -r /app/requirements.embedder.txt ; \
+      pip install --no-cache-dir -r /app/requirements.models.txt ; \
     fi
 
 # Copy full repository (needed for package path `apps.api.*`)
