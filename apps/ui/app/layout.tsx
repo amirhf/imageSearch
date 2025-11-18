@@ -1,6 +1,7 @@
 import './globals.css'
 import { ReactNode } from 'react'
 import { Providers } from './providers'
+import { UserMenu } from '@/components/UserMenu'
 
 export const metadata = {
   title: 'Image Search',
@@ -15,10 +16,15 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <div className="mx-auto max-w-7xl p-4">
             <header className="mb-6 flex items-center justify-between">
               <a href="/" className="text-sm font-medium hover:underline" aria-label="Go to home">Image Search</a>
-              <nav className="flex items-center gap-3 text-sm">
-                <a href="/" className="hover:underline">Home</a>
-                <a href="/upload" className="hover:underline">Upload</a>
-                <a href="/metrics" className="hover:underline">Metrics</a>
+              <nav className="flex items-center gap-6">
+                <div className="flex items-center gap-3 text-sm">
+                  <a href="/" className="hover:underline">Home</a>
+                  <a href="/upload" className="hover:underline">Upload</a>
+                  <a href="/library" className="hover:underline">Library</a>
+                  <a href="/explore" className="hover:underline">Explore</a>
+                  <a href="/metrics" className="hover:underline">Metrics</a>
+                </div>
+                <UserMenu />
               </nav>
             </header>
             {children}

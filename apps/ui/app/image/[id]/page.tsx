@@ -1,16 +1,75 @@
-import { API_BASE } from '@/lib/config'
+'use client'
 
-export const dynamic = 'force-dynamic'
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 
-async function getData(id: string) {
-  const r = await fetch(`${API_BASE}/images/${id}`, { cache: 'no-store' })
-  if (!r.ok) throw new Error(`Failed to load image ${id}`)
-  return r.json() as Promise<any>
-}
+export default function ImagePage() {
+  const params = useParams()
+  const id = params.id as string
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-export default async function ImagePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const data = await getData(id)
+  useEffect(() => {
+    async function loadImage() {
+      try {
+        setLoading(true)
+        setError(null)
+        
+        // Get auth token
+        const supabase = createClient()
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        
+        const headers: HeadersInit = {}
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+        
+        const r = await fetch(`/api/images/${id}`, { 
+          cache: 'no-store',
+          headers 
+        })
+        
+        if (!r.ok) {
+          throw new Error(`Failed to load image: ${r.status}`)
+        }
+        
+        const imageData = await r.json()
+        setData(imageData)
+      } catch (err: any) {
+        setError(err.message || 'Failed to load image')
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadImage()
+  }, [id])
+
+  if (loading) {
+    return (
+      <main className="space-y-6">
+        <div className="text-center py-12">
+          <div className="text-neutral-600">Loading...</div>
+        </div>
+      </main>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <main className="space-y-6">
+        <div className="text-center py-12">
+          <div className="text-red-600">{error || 'Image not found'}</div>
+          <a href="/" className="text-sm text-blue-600 hover:underline mt-4 inline-block">
+            Back to search
+          </a>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="space-y-6">

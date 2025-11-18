@@ -1,5 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Depends
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from contextlib import asynccontextmanager
@@ -16,6 +17,8 @@ from prometheus_client import (
 
 from apps.api.deps import get_vector_store, get_captioner, get_embedder, get_image_storage
 from apps.api.routing_policy import should_use_cloud
+from apps.api.auth.dependencies import get_current_user, require_auth, require_admin
+from apps.api.auth.models import CurrentUser
 
 load_dotenv()
 
@@ -67,6 +70,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Feature Router", version="0.1.0", lifespan=lifespan)
 
+# Add CORS middleware for frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3100",  # Next.js dev server
+        "http://localhost:3000",  # Alternative port
+        os.getenv("FRONTEND_URL", "http://localhost:3100")
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
+
 class ImageIn(BaseModel):
     url: Optional[str] = None
 
@@ -86,6 +103,70 @@ def health():
 def gcp_health():
     # Common GCP health endpoint
     return {"status": "ok"}
+
+
+# ============================================================================
+# Authentication Endpoints
+# ============================================================================
+
+@app.get("/auth/me")
+async def get_me(current_user: Optional[CurrentUser] = Depends(get_current_user)):
+    """
+    Get current user info from JWT.
+    Useful for debugging and client-side auth state management.
+    Returns authenticated=false if no valid token provided.
+    """
+    if not current_user:
+        return {
+            "authenticated": False,
+            "user": None
+        }
+    
+    return {
+        "authenticated": True,
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "role": current_user.role
+        }
+    }
+
+
+@app.get("/auth/check")
+async def check_auth(current_user: CurrentUser = Depends(require_auth)):
+    """
+    Protected endpoint to verify authentication.
+    Returns 401 if not authenticated.
+    Useful for testing auth flow.
+    """
+    return {
+        "authenticated": True,
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "role": current_user.role
+        }
+    }
+
+
+@app.get("/admin/health")
+async def admin_health(admin: CurrentUser = Depends(require_admin)):
+    """
+    Admin-only endpoint for testing role-based access.
+    Returns 403 if user is not an admin.
+    """
+    return {
+        "status": "ok",
+        "admin": {
+            "id": admin.id,
+            "email": admin.email
+        }
+    }
+
+
+# ============================================================================
+# Metrics Endpoint
+# ============================================================================
 
 async def _generate_metrics_async():
     """Helper to generate metrics in thread pool to avoid blocking"""
@@ -117,7 +198,9 @@ async def metrics():
 @app.post("/images")
 async def ingest_image(
     file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None)
+    url: Optional[str] = Form(None),
+    visibility: str = Form("private"),
+    current_user: CurrentUser = Depends(require_auth)
 ):
     import traceback
     try:
@@ -185,6 +268,14 @@ async def ingest_image(
         # Persist image and thumbnail to configured storage
         img_metadata = await storage.save_image(image_id=image_id, image_bytes=img_bytes, generate_thumbnail=True)
 
+        # Validate visibility
+        if visibility not in ("private", "public", "public_admin"):
+            raise HTTPException(400, "visibility must be 'private', 'public', or 'public_admin'")
+        
+        # Only admins can create public_admin images
+        if visibility == "public_admin" and not current_user.is_admin():
+            raise HTTPException(403, "Only admins can create public_admin images")
+        
         store = get_vector_store()
         await store.upsert_image(
             image_id=image_id,
@@ -198,7 +289,9 @@ async def ingest_image(
             size_bytes=img_metadata.size_bytes,
             width=img_metadata.width,
             height=img_metadata.height,
-            thumbnail_path=img_metadata.thumbnail_path
+            thumbnail_path=img_metadata.thumbnail_path,
+            owner_user_id=current_user.id,
+            visibility=visibility
         )
 
         base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
@@ -227,11 +320,31 @@ async def ingest_image(
             pass
 
 @app.get("/images/{image_id}")
-async def get_image(image_id: str):
+async def get_image(
+    image_id: str,
+    current_user: Optional[CurrentUser] = Depends(get_current_user)
+):
     store = get_vector_store()
     doc = await store.fetch_image(image_id)
     if not doc:
         raise HTTPException(404, "Not found")
+    
+    # Check if image is deleted
+    if doc.get("deleted_at"):
+        raise HTTPException(404, "Image not found")
+    
+    # Access control
+    owner_id = doc.get("owner_user_id")
+    visibility = doc.get("visibility", "private")
+    
+    # Anonymous users can only see public images
+    if not current_user:
+        if visibility not in ("public", "public_admin"):
+            raise HTTPException(401, "Authentication required")
+    else:
+        # Authenticated users: check access
+        if not current_user.can_access_image(owner_id, visibility):
+            raise HTTPException(403, "Access denied")
     
     # Prefer direct storage URLs (presigned/public) for performance
     storage = get_image_storage()
@@ -241,18 +354,35 @@ async def get_image(image_id: str):
     return doc
 
 @app.get("/images/{image_id}/download")
-async def download_image(image_id: str):
+async def download_image(
+    image_id: str,
+    current_user: Optional[CurrentUser] = Depends(get_current_user)
+):
     """Download the original image file"""
+    # Check access control first
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    if not doc or doc.get("deleted_at"):
+        raise HTTPException(404, "Image not found")
+    
+    # Access control
+    owner_id = doc.get("owner_user_id")
+    visibility = doc.get("visibility", "private")
+    
+    if not current_user:
+        if visibility not in ("public", "public_admin"):
+            raise HTTPException(401, "Authentication required")
+    else:
+        if not current_user.can_access_image(owner_id, visibility):
+            raise HTTPException(403, "Access denied")
+    
     storage = get_image_storage()
     img_bytes = await storage.get_image(image_id)
     
     if not img_bytes:
         raise HTTPException(404, "Image not found")
     
-    # Get format from database for correct content-type
-    store = get_vector_store()
-    doc = await store.fetch_image(image_id)
-    img_format = doc.get("format", "jpeg") if doc else "jpeg"
+    img_format = doc.get("format", "jpeg")
     
     # Map format to MIME type
     mime_types = {
@@ -266,18 +396,35 @@ async def download_image(image_id: str):
     return Response(content=img_bytes, media_type=content_type)
 
 @app.get("/images/{image_id}/thumbnail")
-async def download_thumbnail(image_id: str):
+async def download_thumbnail(
+    image_id: str,
+    current_user: Optional[CurrentUser] = Depends(get_current_user)
+):
     """Download the thumbnail image"""
+    # Check access control first
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    if not doc or doc.get("deleted_at"):
+        raise HTTPException(404, "Thumbnail not found")
+    
+    # Access control
+    owner_id = doc.get("owner_user_id")
+    visibility = doc.get("visibility", "private")
+    
+    if not current_user:
+        if visibility not in ("public", "public_admin"):
+            raise HTTPException(401, "Authentication required")
+    else:
+        if not current_user.can_access_image(owner_id, visibility):
+            raise HTTPException(403, "Access denied")
+    
     storage = get_image_storage()
     thumb_bytes = await storage.get_thumbnail(image_id)
     
     if not thumb_bytes:
         raise HTTPException(404, "Thumbnail not found")
     
-    # Get format from database
-    store = get_vector_store()
-    doc = await store.fetch_image(image_id)
-    img_format = doc.get("format", "jpeg") if doc else "jpeg"
+    img_format = doc.get("format", "jpeg")
     
     # Map format to MIME type
     mime_types = {
@@ -291,12 +438,44 @@ async def download_thumbnail(image_id: str):
     return Response(content=thumb_bytes, media_type=content_type)
 
 @app.get("/search")
-async def search(q: str, k: int = 10):
+async def search(
+    q: str,
+    k: int = 10,
+    scope: str = "all",
+    current_user: Optional[CurrentUser] = Depends(get_current_user)
+):
+    """Search images with multi-tenant filtering.
+    
+    Args:
+        q: Search query text
+        k: Number of results to return
+        scope: Search scope - 'all' (default), 'mine', or 'public'
+            - 'all': My private images + all public images (requires auth)
+            - 'mine': Only my images (requires auth)
+            - 'public': Only public images (works for anonymous)
+    """
+    # Validate scope
+    if scope not in ("all", "mine", "public"):
+        raise HTTPException(400, "scope must be 'all', 'mine', or 'public'")
+    
+    # Scope validation
+    if scope in ("all", "mine") and not current_user:
+        raise HTTPException(401, "Authentication required for scope='" + scope + "'")
+    
     t0 = time.time()
     embedder = get_embedder()
     q_vec = await embedder.embed_text(q)
     store = get_vector_store()
-    results = await store.search(query_vec=q_vec, k=k, text_query=q)
+    
+    # Pass user context to vector store for filtering
+    user_id = current_user.id if current_user else None
+    results = await store.search(
+        query_vec=q_vec,
+        k=k,
+        text_query=q,
+        user_id=user_id,
+        scope=scope
+    )
     
     # Add direct storage URLs for fast client rendering
     storage = get_image_storage()
@@ -313,3 +492,128 @@ async def search(q: str, k: int = 10):
             LATENCY.observe(max(1.0, (time.time() - t0) * 1000.0))
         except Exception:
             pass
+
+
+# ============================================================================
+# Image Management Endpoints (Update/Delete)
+# ============================================================================
+
+class ImageUpdate(BaseModel):
+    """Schema for updating image metadata"""
+    visibility: Optional[str] = None
+
+
+@app.patch("/images/{image_id}")
+async def update_image(
+    image_id: str,
+    update: ImageUpdate,
+    current_user: CurrentUser = Depends(require_auth)
+):
+    """Update image metadata (visibility, etc.)"""
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    
+    if not doc or doc.get("deleted_at"):
+        raise HTTPException(404, "Image not found")
+    
+    # Check modification permissions
+    owner_id = doc.get("owner_user_id")
+    if not current_user.can_modify_image(owner_id):
+        raise HTTPException(403, "You don't have permission to modify this image")
+    
+    # Validate and update visibility
+    if update.visibility is not None:
+        if update.visibility not in ("private", "public", "public_admin"):
+            raise HTTPException(400, "visibility must be 'private', 'public', or 'public_admin'")
+        
+        # Only admins can set public_admin
+        if update.visibility == "public_admin" and not current_user.is_admin():
+            raise HTTPException(403, "Only admins can set visibility to 'public_admin'")
+        
+        await store.update_visibility(image_id, update.visibility)
+    
+    # Fetch updated document
+    updated_doc = await store.fetch_image(image_id)
+    
+    # Add storage URLs
+    storage = get_image_storage()
+    updated_doc["download_url"] = storage.get_image_url(image_id)
+    updated_doc["thumbnail_url"] = storage.get_thumbnail_url(image_id)
+    
+    return updated_doc
+
+
+@app.delete("/images/{image_id}")
+async def delete_image(
+    image_id: str,
+    current_user: CurrentUser = Depends(require_auth)
+):
+    """Soft delete an image"""
+    store = get_vector_store()
+    doc = await store.fetch_image(image_id)
+    
+    if not doc:
+        raise HTTPException(404, "Image not found")
+    
+    if doc.get("deleted_at"):
+        raise HTTPException(404, "Image already deleted")
+    
+    # Check modification permissions
+    owner_id = doc.get("owner_user_id")
+    if not current_user.can_modify_image(owner_id):
+        raise HTTPException(403, "You don't have permission to delete this image")
+    
+    # Soft delete
+    await store.soft_delete_image(image_id)
+    
+    return {"message": "Image deleted successfully", "id": image_id}
+
+
+@app.get("/images")
+async def list_images(
+    limit: int = 20,
+    offset: int = 0,
+    visibility: Optional[str] = None,
+    current_user: Optional[CurrentUser] = Depends(get_current_user)
+):
+    """List images with filtering.
+    
+    Args:
+        limit: Number of images to return (max 100)
+        offset: Pagination offset
+        visibility: Filter by visibility ('private', 'public', 'public_admin')
+        
+    Returns images based on user permissions:
+    - Anonymous: Only public/public_admin images
+    - Authenticated: Own images + public images
+    - Admin: All images
+    """
+    if limit > 100:
+        limit = 100
+    
+    store = get_vector_store()
+    user_id = current_user.id if current_user else None
+    is_admin = current_user.is_admin() if current_user else False
+    
+    images = await store.list_images(
+        user_id=user_id,
+        is_admin=is_admin,
+        limit=limit,
+        offset=offset,
+        visibility_filter=visibility
+    )
+    
+    # Add storage URLs
+    storage = get_image_storage()
+    for img in images:
+        image_id = img.get("id")
+        if image_id:
+            img["download_url"] = storage.get_image_url(image_id)
+            img["thumbnail_url"] = storage.get_thumbnail_url(image_id)
+    
+    return {
+        "images": images,
+        "limit": limit,
+        "offset": offset,
+        "count": len(images)
+    }

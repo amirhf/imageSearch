@@ -2,11 +2,15 @@
 import { useState, useRef, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { uploadImage } from '@/lib/api'
+import { useAuth } from '@/lib/auth/AuthContext'
+import { createClient } from '@/lib/supabase/client'
 
 export default function UploadDropzone() {
   const router = useRouter()
+  const { user } = useAuth()
   const [url, setUrl] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [visibility, setVisibility] = useState<'private' | 'public'>('private')
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -22,15 +26,29 @@ export default function UploadDropzone() {
     }
     try {
       setLoading(true)
+      
+      // Get auth token
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      if (!token) {
+        setError('You must be logged in to upload images')
+        setLoading(false)
+        return
+      }
+      
       // If a file is present, use XHR to track upload progress
       if (file) {
         const form = new FormData()
         form.set('file', file, file.name)
         if (url) form.set('url', url)
+        form.set('visibility', visibility)
 
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest()
           xhr.open('POST', '/api/images', true)
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) {
               const pct = Math.round((ev.loaded / ev.total) * 100)
@@ -44,6 +62,10 @@ export default function UploadDropzone() {
                   const json = JSON.parse(xhr.responseText)
                   router.push(`/image/${json.id}`)
                   resolve()
+                } else if (xhr.status === 401) {
+                  reject(new Error('Authentication required. Please log in.'))
+                } else if (xhr.status === 403) {
+                  reject(new Error('You do not have permission to perform this action'))
                 } else {
                   reject(new Error(`Upload failed: ${xhr.status}`))
                 }
@@ -58,7 +80,7 @@ export default function UploadDropzone() {
       } else {
         // URL-only: small payload; use fetch and show indeterminate progress UI
         setProgress(-1) // signal indeterminate
-        const res = await uploadImage({ url })
+        const res = await uploadImage({ url, visibility }, token)
         router.push(`/image/${res.id}`)
       }
     } catch (err: any) {
@@ -111,19 +133,51 @@ export default function UploadDropzone() {
         />
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="space-y-3">
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="Or paste image URL (Unsplash/COCO/etc)"
-          className="flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 shadow-sm focus:outline-none"
+          className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 shadow-sm focus:outline-none"
           aria-label="Image URL"
           disabled={loading}
         />
+        
+        {/* Visibility Selector */}
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-medium text-neutral-700">Visibility:</label>
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="visibility"
+                value="private"
+                checked={visibility === 'private'}
+                onChange={(e) => setVisibility(e.target.value as 'private' | 'public')}
+                disabled={loading}
+                className="cursor-pointer"
+              />
+              <span className="text-sm text-neutral-700">Private</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="visibility"
+                value="public"
+                checked={visibility === 'public'}
+                onChange={(e) => setVisibility(e.target.value as 'private' | 'public')}
+                disabled={loading}
+                className="cursor-pointer"
+              />
+              <span className="text-sm text-neutral-700">Public</span>
+            </label>
+          </div>
+        </div>
+        
         <button
           type="submit"
           disabled={loading}
-          className="rounded-md bg-neutral-900 px-4 py-2 text-white hover:bg-neutral-800 disabled:opacity-60"
+          className="w-full rounded-md bg-neutral-900 px-4 py-2 text-white hover:bg-neutral-800 disabled:opacity-60"
         >
           {loading ? 'Uploading…' : 'Upload'}
         </button>
