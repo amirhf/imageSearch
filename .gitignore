@@ -1,6 +1,7 @@
 # Environment
 .env
 .env.docker
+.env.production
 
 # Python
 __pycache__/
