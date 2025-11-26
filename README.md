@@ -9,12 +9,52 @@ Local‑first image captioning + semantic image/text search with a **cost/latenc
 - **Multi-tenant architecture** with Supabase authentication
 - **Privacy controls** - users can upload private or public images
 
-## One‑liner demo
+## Quick Start
+
+### Option 1: Run API Locally
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
+# Start infrastructure (Postgres, Qdrant, etc.)
+docker compose -f infra/docker-compose.yml up -d
+
+# Run API with uvicorn
 uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
-# open http://localhost:8000/docs to upload an image and run /search
+# open http://localhost:8000/docs
 ```
+
+### Option 2: Run API in Docker
+```bash
+# 1. Create .env.docker file (see Configuration section below)
+cp .env.example .env.docker
+# Edit .env.docker with your values
+
+# 2. Build API image with embedder support
+docker build -f apps/api/Dockerfile --build-arg INSTALL_EMBEDDER=true -t imagesearch-api:embedder .
+
+# 3. Start infrastructure
+cd infra && docker-compose up -d
+
+# 4. Run API container
+docker run -d --name api \
+  --network infra_default \
+  -p 8000:8000 \
+  --env-file .env.docker \
+  imagesearch-api:embedder
+
+# open http://localhost:8000/docs
+```
+
+### Run Frontend (Next.js UI)
+The project includes a full-featured web UI in `apps/ui/`:
+```bash
+cd apps/ui
+cp .env.local.example .env.local
+# Edit .env.local with your Supabase credentials and API URL
+npm install
+npm run dev
+# open http://localhost:3100
+```
+
+See the [Frontend section](#frontend-nextjs-ui) below for detailed setup and features.
 
 ## Storage Options
 - **Local** - Files stored on disk (default, zero setup)
@@ -56,15 +96,17 @@ See [S3_STORAGE_SETUP.md](S3_STORAGE_SETUP.md) for complete setup guide.
 - `PATCH /images/{id}` – update image metadata (caption, visibility)
 - `DELETE /images/{id}` – soft delete image (owner only)
 
-## Config
-Environment (.env):
-```
+## Configuration
+
+### Local Development (.env)
+For running the API with `uvicorn` locally:
+```bash
 # Vector Store
-VECTOR_BACKEND=pgvector   # or qdrant
+VECTOR_BACKEND=pgvector
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ai_router
 QDRANT_URL=http://localhost:6333
 
-# Supabase Authentication (Multi-tenant)
+# Supabase Authentication
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_JWT_SECRET=your-jwt-secret-from-supabase-settings
 SUPABASE_SERVICE_KEY=your-service-role-key
@@ -72,36 +114,78 @@ SUPABASE_ANON_KEY=your-anon-key
 ADMIN_USER_ID=your-admin-user-uuid
 
 # Cloud providers
-CLOUD_PROVIDER=openrouter  # openrouter, openai, gemini, or anthropic
-OPENROUTER_API_KEY=
+CLOUD_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL=openai/gpt-4o-mini
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
 
 # Routing policy
 CAPTION_CONFIDENCE_THRESHOLD=0.55
 CAPTION_LATENCY_BUDGET_MS=600
 
 # Model Configuration
-USE_MOCK_MODELS=false  # Set to true to disable ML models (cloud-only)
-USE_REAL_EMBEDDER=true
-USE_REAL_CAPTIONER=false
+USE_MOCK_MODELS=false
 
 # Image storage
-IMAGE_STORAGE_BACKEND=local   # local, minio, or s3
-IMAGE_STORAGE_PATH=./storage/images  # For local backend
-THUMBNAIL_SIZE=256
+IMAGE_STORAGE_BACKEND=local
+IMAGE_STORAGE_PATH=./storage/images
+BASE_URL=http://localhost:8000
+```
+
+### Docker Deployment (.env.docker)
+For running the API in Docker, create `.env.docker` with **Docker network hostnames**:
+
+```bash
+# Vector Store Configuration (Docker network hostnames)
+VECTOR_BACKEND=pgvector
+DATABASE_URL=postgresql+psycopg://postgres:postgres@infra-postgres-1:5432/ai_router
+QDRANT_URL=http://infra-qdrant-1:6333
+
+# Model Configuration
+# Set to false to use real models (requires embedder image)
+USE_MOCK_MODELS=false
+
+# Cloud Provider Configuration
+CLOUD_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+OPENROUTER_MODEL=openai/gpt-4o-mini
+
+# Routing Policy
+CAPTION_CONFIDENCE_THRESHOLD=0.55  # Use 0.99 to force cloud usage
+CAPTION_LATENCY_BUDGET_MS=600
+
+# Cloud Rate Limiting
+CLOUD_MAX_REQUESTS_PER_MINUTE=60
+CLOUD_MAX_REQUESTS_PER_DAY=10000
+CLOUD_DAILY_BUDGET_USD=10.00
+
+# Supabase Configuration (Multi-tenant Authentication)
+# Get these from: https://supabase.com/dashboard/project/YOUR_PROJECT/settings/api
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_JWT_SECRET=your-jwt-secret-from-api-settings
+SUPABASE_SERVICE_KEY=eyJhbGc...your-service-role-key
+SUPABASE_ANON_KEY=eyJhbGc...your-anon-key
+ADMIN_USER_ID=your-admin-user-uuid
+
+# Image Storage (Docker)
+IMAGE_STORAGE_BACKEND=minio  # or local, s3
+IMAGE_STORAGE_PATH=/app/storage/images
 BASE_URL=http://localhost:8000
 
-# S3-Compatible Storage (MinIO/Cloudflare R2/AWS S3)
+# MinIO Configuration (if using minio backend)
 S3_BUCKET_NAME=imagesearch
-S3_ENDPOINT_URL=http://localhost:9000  # MinIO or R2/S3 endpoint
+S3_ENDPOINT_URL=http://infra-minio-1:9000
 S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
-S3_REGION=us-east-1  # or 'auto' for Cloudflare R2
+S3_REGION=us-east-1
 S3_USE_PRESIGNED_URLS=true
+S3_PRESIGNED_URL_EXPIRY=3600
 ```
+
+**Key differences for Docker:**
+- Use Docker service names (e.g., `infra-postgres-1` instead of `localhost`)
+- Set `USE_MOCK_MODELS=false` if you built with `INSTALL_EMBEDDER=true`
+- Use `minio` storage backend with Docker service name `infra-minio-1`
+- Get Supabase credentials from your project's API settings page
 
 ## Multi-Tenant Setup
 
@@ -159,18 +243,36 @@ pytest tests/ -v
 ```
 
 ## Dataset Seeding
-Seed the database with real image datasets:
+Seed the database with real image datasets. **Requires authentication** since the `/images` endpoint is protected.
 
+### Get Authentication Token
+1. Log in to your frontend (http://localhost:3100)
+2. Open browser DevTools (F12) → Console
+3. Run: `JSON.parse(localStorage.getItem('sb-YOUR_PROJECT_ID-auth-token')).access_token`
+4. Copy the JWT token
+
+### Seed Images
 ```bash
 # COCO validation set (automatic download)
-python scripts/seed_datasets.py --dataset coco --count 1000
+python scripts/seed_datasets.py \
+  --dataset coco \
+  --count 100 \
+  --auth-token "YOUR_JWT_TOKEN" \
+  --visibility public
 
 # Unsplash (requires API key)
-python scripts/seed_datasets.py --dataset unsplash --count 500 --api-key YOUR_KEY
+python scripts/seed_datasets.py \
+  --dataset unsplash \
+  --count 50 \
+  --api-key YOUR_UNSPLASH_KEY \
+  --auth-token "YOUR_JWT_TOKEN" \
+  --visibility public
 
 # List available datasets
 python scripts/seed_datasets.py --list
 ```
+
+**Note:** Images are processed **sequentially** to avoid overwhelming cloud APIs. Expect ~10-15 seconds per image with cloud captioning.
 
 ## Benchmarking
 Run comprehensive performance benchmarks:

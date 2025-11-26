@@ -94,6 +94,8 @@ async def get_current_user(
     Extract and validate Supabase JWT from Authorization header.
     Returns None for anonymous users (no authentication required).
     
+    Also supports SEEDING_API_KEY for automated seeding scripts.
+    
     This is the main authentication dependency. Use it for endpoints that
     work differently for authenticated vs anonymous users.
     
@@ -119,6 +121,26 @@ async def get_current_user(
         return None
     
     token = credentials.credentials
+    
+    # Check for seeding API key (for automated scripts)
+    seeding_api_key = os.getenv("SEEDING_API_KEY")
+    if seeding_api_key and token == seeding_api_key:
+        admin_user_id = os.getenv("ADMIN_USER_ID")
+        if not admin_user_id:
+            logger.error("SEEDING_API_KEY provided but ADMIN_USER_ID not configured")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Seeding not configured properly"
+            )
+        
+        logger.info(f"Seeding API key authenticated - using admin user {admin_user_id}")
+        # Return admin user for seeding
+        return CurrentUser(
+            id=admin_user_id,
+            email="seeding@example.com",
+            role="admin"
+        )
+    
     jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
     
     if not jwt_secret:

@@ -16,17 +16,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
   && rm -rf /var/lib/apt/lists/*
 
-# Install light requirements (no Torch)
+# Install base requirements
 COPY apps/api/requirements.base.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Optional: install embedder-only deps for hybrid mode (Torch + open-clip)
-ARG INSTALL_EMBEDDER=false
-COPY apps/api/requirements.embedder.txt /app/requirements.embedder.txt
+# Install ML model dependencies (Torch + transformers + open-clip)
+# These are needed for real captioning/embedding (USE_MOCK_MODELS=false)
+# Set USE_MOCK_MODELS=true in .env to skip using these at runtime
 COPY apps/api/requirements.models.txt /app/requirements.models.txt
-RUN if [ "$INSTALL_EMBEDDER" = "true" ]; then \
-      pip install --no-cache-dir -r /app/requirements.models.txt ; \
-    fi
+RUN pip install --no-cache-dir -r /app/requirements.models.txt
 
 # Copy full repository (needed for package path `apps.api.*`)
 COPY . /app

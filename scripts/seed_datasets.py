@@ -2,9 +2,16 @@
 Enhanced dataset seeding script for COCO, Unsplash, and other image datasets.
 Downloads images and ingests them into the ImageSearch system with proper attribution.
 
+Supports multi-tenant authentication and visibility controls.
+
 Usage:
-    python scripts/seed_datasets.py --dataset coco --count 1000
-    python scripts/seed_datasets.py --dataset unsplash --count 500 --api-key YOUR_KEY
+    # Seed as authenticated user
+    python scripts/seed_datasets.py --dataset coco --count 1000 --auth-token YOUR_TOKEN --visibility public
+    
+    # Seed as admin (public_admin visibility)
+    python scripts/seed_datasets.py --dataset unsplash --count 500 --api-key YOUR_KEY --auth-token ADMIN_TOKEN --visibility public_admin
+    
+    # List available datasets
     python scripts/seed_datasets.py --list
 """
 import asyncio
@@ -12,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 import httpx
@@ -23,8 +31,10 @@ import io
 class DatasetSeeder:
     """Base class for dataset seeders"""
     
-    def __init__(self, api_url: str = "http://localhost:8000"):
+    def __init__(self, api_url: str = "http://localhost:8000", auth_token: Optional[str] = None, visibility: str = "public"):
         self.api_url = api_url.rstrip('/')
+        self.auth_token = auth_token
+        self.visibility = visibility
         self.session = None
     
     async def __aenter__(self):
@@ -35,22 +45,63 @@ class DatasetSeeder:
         if self.session:
             await self.session.aclose()
     
-    async def ingest_image(self, image_url: str, metadata: Dict) -> Optional[Dict]:
-        """Ingest a single image from URL"""
-        try:
-            # Send as form data with url field
-            form_data = {"url": image_url}
-            response = await self.session.post(
-                f"{self.api_url}/images",
-                data=form_data
-            )
-            response.raise_for_status()
-            result = response.json()
-            result["metadata"] = metadata
-            return result
-        except Exception as e:
-            print(f"Error ingesting {image_url}: {e}")
-            return None
+    async def ingest_image(self, image_url: str, metadata: Dict, retry_count: int = 3) -> Optional[Dict]:
+        """Ingest a single image from URL with authentication and retry logic"""
+        for attempt in range(retry_count):
+            try:
+                # Prepare headers with auth token if provided
+                headers = {}
+                if self.auth_token:
+                    headers["Authorization"] = f"Bearer {self.auth_token}"
+                
+                # Send as form data with url field and visibility
+                form_data = {
+                    "url": image_url,
+                    "visibility": self.visibility
+                }
+                
+                response = await self.session.post(
+                    f"{self.api_url}/images",
+                    data=form_data,
+                    headers=headers
+                )
+                response.raise_for_status()
+                result = response.json()
+                result["metadata"] = metadata
+                return result
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    print(f"\n❌ Authentication failed (401 Unauthorized)")
+                    print(f"   Your JWT token has likely expired.")
+                    print(f"   Please get a new token and restart the seeding.")
+                    print(f"   Images successfully seeded so far will be preserved.")
+                    raise  # Don't retry on auth errors
+                elif e.response.status_code >= 500 and attempt < retry_count - 1:
+                    # Retry on server errors
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    print(f"\n⚠️  Server error {e.response.status_code}, retrying in {wait_time}s... (attempt {attempt + 1}/{retry_count})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    print(f"\n❌ Error ingesting {image_url}: HTTP {e.response.status_code}")
+                    return None
+                    
+            except httpx.RequestError as e:
+                if attempt < retry_count - 1:
+                    wait_time = 2 ** attempt
+                    print(f"\n⚠️  Network error, retrying in {wait_time}s... (attempt {attempt + 1}/{retry_count})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    print(f"\n❌ Network error ingesting {image_url}: {e}")
+                    return None
+                    
+            except Exception as e:
+                print(f"\n❌ Unexpected error ingesting {image_url}: {e}")
+                return None
+        
+        return None
     
     async def seed(self, count: int, **kwargs) -> List[Dict]:
         """Seed images from dataset"""
@@ -119,15 +170,32 @@ class COCOSeeder(DatasetSeeder):
                 }
                 return await self.ingest_image(image_url, metadata)
         
+        # Process in parallel with concurrency limit
+        print(f"\n🚀 Starting parallel ingestion of {len(images)} images...")
+        print(f"   Concurrency: up to 10 simultaneous requests")
+        print(f"   Estimated time: {len(images) * 3 // 60} minutes (with parallelization)\n")
+        
         tasks = [ingest_with_limit(img) for img in images]
         
-        # Use tqdm for progress bar
+        # Use tqdm with as_completed for progress bar
         for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Ingesting"):
-            result = await coro
-            if result:
-                results.append(result)
+            try:
+                result = await coro
+                if result:
+                    results.append(result)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    # Auth error - likely seeding key issue
+                    print(f"\n\n⚠️  Authentication Error!")
+                    print(f"   Check your SEEDING_API_KEY in .env.docker")
+                    break
+            except Exception as e:
+                # Other errors are already logged in ingest_image
+                pass
         
-        print(f"Successfully ingested {len(results)}/{len(images)} images")
+        print(f"\n✅ Successfully ingested {len(results)}/{len(images)} images")
+        if len(results) < len(images):
+            print(f"   ⚠️  {len(images) - len(results)} images failed or were skipped")
         return results
 
 
@@ -136,8 +204,8 @@ class UnsplashSeeder(DatasetSeeder):
     
     RANDOM_URL = "https://api.unsplash.com/photos/random"
     
-    def __init__(self, api_url: str, api_key: str):
-        super().__init__(api_url)
+    def __init__(self, api_url: str, api_key: str, auth_token: Optional[str] = None, visibility: str = "public"):
+        super().__init__(api_url, auth_token, visibility)
         self.api_key = api_key
     
     async def seed(self, count: int, **kwargs) -> List[Dict]:
@@ -218,12 +286,20 @@ class Flickr30kSeeder(DatasetSeeder):
         async def ingest_file(img_path):
             async with semaphore:
                 try:
+                    # Prepare headers with auth token if provided
+                    headers = {}
+                    if self.auth_token:
+                        headers["Authorization"] = f"Bearer {self.auth_token}"
+                    
                     # Read image file
                     with open(img_path, 'rb') as f:
                         files = {'file': (img_path.name, f, 'image/jpeg')}
+                        data = {'visibility': self.visibility}
                         response = await self.session.post(
                             f"{self.api_url}/images",
-                            files=files
+                            files=files,
+                            data=data,
+                            headers=headers
                         )
                         response.raise_for_status()
                         result = response.json()
@@ -255,26 +331,34 @@ def list_datasets():
     print("   - ~5000 images with annotations")
     print("   - Automatic download")
     print("   - License: CC BY 4.0")
-    print("   - Usage: --dataset coco --count 1000")
+    print("   - Usage: --dataset coco --count 1000 --auth-token TOKEN --visibility public")
     
     print("\n2. Unsplash")
     print("   - High-quality photos")
     print("   - Requires API key (free)")
     print("   - License: Unsplash License (free to use)")
     print("   - Get key: https://unsplash.com/developers")
-    print("   - Usage: --dataset unsplash --count 500 --api-key YOUR_KEY")
+    print("   - Usage: --dataset unsplash --count 500 --api-key YOUR_KEY --auth-token TOKEN --visibility public")
     
     print("\n3. Flickr30k")
     print("   - 30,000 images with captions")
     print("   - Requires manual download from Kaggle")
     print("   - License: CC BY-NC-SA 2.0")
     print("   - Download: kaggle datasets download -d adityajn105/flickr30k")
-    print("   - Usage: --dataset flickr30k --count 1000 --data-dir ./data/flickr30k")
+    print("   - Usage: --dataset flickr30k --count 1000 --data-dir ./data/flickr30k --auth-token TOKEN --visibility public")
+    print("\nVisibility Options:")
+    print("   - private: Only visible to the owner (default for authenticated users)")
+    print("   - public: Visible to all authenticated users")
+    print("   - public_admin: System-wide public images (requires admin token)")
+    print("\nAuthentication:")
+    print("   - Get auth token from Supabase or your authentication provider")
+    print("   - Use --auth-token to authenticate requests")
+    print("   - Without auth token, requests will fail (authentication required for uploads)")
     print()
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Seed ImageSearch with dataset images")
+    parser = argparse.ArgumentParser(description="Seed ImageSearch with dataset images (multi-tenant support)")
     parser.add_argument("--dataset", choices=["coco", "unsplash", "flickr30k"], 
                        help="Dataset to seed from")
     parser.add_argument("--count", type=int, default=100,
@@ -282,6 +366,11 @@ async def main():
     parser.add_argument("--api-url", default="http://localhost:8000",
                        help="API URL (default: http://localhost:8000)")
     parser.add_argument("--api-key", help="API key (required for Unsplash)")
+    parser.add_argument("--auth-token", help="Authentication token (JWT or seeding API key)")
+    parser.add_argument("--seeding-key", help="Seeding API key from SEEDING_API_KEY env var (easier than JWT)")
+    parser.add_argument("--visibility", choices=["private", "public", "public_admin"],
+                       default="public",
+                       help="Image visibility (default: public)")
     parser.add_argument("--cache-dir", default="./data/coco",
                        help="Cache directory for COCO (default: ./data/coco)")
     parser.add_argument("--data-dir", default="./data/flickr30k",
@@ -301,19 +390,30 @@ async def main():
         print("\nUse --list to see available datasets")
         return
     
+    # Determine auth token (prefer seeding-key, fallback to auth-token, fallback to env var)
+    auth_token = args.seeding_key or args.auth_token or os.getenv("SEEDING_API_KEY")
+    
+    if not auth_token:
+        print("\n⚠️  WARNING: No authentication provided.")
+        print("Image uploads require authentication. Options:")
+        print("  1. Use --seeding-key with your SEEDING_API_KEY from .env.docker")
+        print("  2. Use --auth-token with a JWT token from your browser")
+        print("  3. Set SEEDING_API_KEY environment variable")
+        print("\nProceeding without authentication (uploads will likely fail)...\n")
+    
     # Create seeder
     if args.dataset == "coco":
-        async with COCOSeeder(args.api_url) as seeder:
+        async with COCOSeeder(args.api_url, auth_token, args.visibility) as seeder:
             results = await seeder.seed(args.count, cache_dir=args.cache_dir)
     elif args.dataset == "unsplash":
         if not args.api_key:
             print("ERROR: Unsplash requires --api-key")
             print("Get a free key at: https://unsplash.com/developers")
             sys.exit(1)
-        async with UnsplashSeeder(args.api_url, args.api_key) as seeder:
+        async with UnsplashSeeder(args.api_url, args.api_key, auth_token, args.visibility) as seeder:
             results = await seeder.seed(args.count)
     elif args.dataset == "flickr30k":
-        async with Flickr30kSeeder(args.api_url) as seeder:
+        async with Flickr30kSeeder(args.api_url, auth_token, args.visibility) as seeder:
             results = await seeder.seed(args.count, data_dir=args.data_dir)
     
     # Save results
