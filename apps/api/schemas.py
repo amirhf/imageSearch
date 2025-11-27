@@ -7,7 +7,7 @@ class SearchQuery(BaseModel):
     scope: str = "all"
     user_id: Optional[str] = None
 
-class SearchResultItem(BaseModel):
+class SearchResult(BaseModel):
     id: str
     score: float
     caption: Optional[str] = None
@@ -18,4 +18,4 @@ class SearchResultItem(BaseModel):
 
 class SearchResponse(BaseModel):
     query: str
-    results: List[Dict[str, Any]]
+    results: List[SearchResult]

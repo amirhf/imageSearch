@@ -17,8 +17,11 @@ from prometheus_client import (
     REGISTRY, PROCESS_COLLECTOR, PLATFORM_COLLECTOR, GC_COLLECTOR
 )
 
-from apps.api.deps import get_vector_store, get_captioner, get_embedder, get_image_storage
-from apps.api.routing_policy import should_use_cloud
+from apps.api.schemas import SearchQuery
+from apps.api.deps import get_embedder, get_vector_store, get_image_storage
+from apps.api.services.embedder_client import EmbedderClient
+from apps.api.storage.pgvector_store import PgVectorStore
+from apps.api.services.image_storage import ImageStorage
 from apps.api.auth.dependencies import get_current_user, require_auth, require_admin
 from apps.api.auth.models import CurrentUser
 
@@ -437,14 +440,31 @@ async def download_thumbnail(
     
     return Response(content=thumb_bytes, media_type=content_type)
 
-from apps.api.search_backend import PythonSearchBackend, SearchBackend
-from apps.api.schemas import SearchQuery
+from apps.api.search_backend import PythonSearchBackend, GoSearchBackend, ShadowSearchBackend, SearchBackend
 
-def get_search_backend() -> SearchBackend:
+def get_search_backend(
+    embedder: EmbedderClient = Depends(get_embedder),
+    store: PgVectorStore = Depends(get_vector_store),
+    image_storage: ImageStorage = Depends(get_image_storage),
+) -> SearchBackend:
     backend_type = os.getenv("SEARCH_BACKEND", "python")
-    if backend_type == "python":
-        return PythonSearchBackend()
-    return PythonSearchBackend()
+    go_url = os.getenv("GO_SEARCH_URL", "http://localhost:8080")
+    shadow_mode = os.getenv("SEARCH_SHADOW_MODE", "false").lower() == "true"
+
+    # Instantiate backends
+    python_backend = PythonSearchBackend(embedder=embedder, store=store, image_storage=image_storage)
+    # Only instantiate Go backend if needed (it's lightweight, so fine to do always)
+    go_backend = GoSearchBackend(go_url=go_url, embedder=embedder, image_storage=image_storage)
+
+    if shadow_mode:
+        if backend_type == "go":
+            return ShadowSearchBackend(primary=go_backend, shadow=python_backend)
+        else:
+            return ShadowSearchBackend(primary=python_backend, shadow=go_backend)
+
+    if backend_type == "go":
+        return go_backend
+    return python_backend
 
 @app.get("/search")
 async def search(
