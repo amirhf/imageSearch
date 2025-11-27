@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +11,6 @@ import io
 import hashlib
 import os
 import time
-from dotenv import load_dotenv
 import logging
 from prometheus_client import (
     Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST,
@@ -19,8 +21,6 @@ from apps.api.deps import get_vector_store, get_captioner, get_embedder, get_ima
 from apps.api.routing_policy import should_use_cloud
 from apps.api.auth.dependencies import get_current_user, require_auth, require_admin
 from apps.api.auth.models import CurrentUser
-
-load_dotenv()
 
 # Disable automatic _created metrics to reduce noise in Grafana
 os.environ['PROMETHEUS_DISABLE_CREATED_SERIES'] = 'True'
@@ -437,12 +437,22 @@ async def download_thumbnail(
     
     return Response(content=thumb_bytes, media_type=content_type)
 
+from apps.api.search_backend import PythonSearchBackend, SearchBackend
+from apps.api.schemas import SearchQuery
+
+def get_search_backend() -> SearchBackend:
+    backend_type = os.getenv("SEARCH_BACKEND", "python")
+    if backend_type == "python":
+        return PythonSearchBackend()
+    return PythonSearchBackend()
+
 @app.get("/search")
 async def search(
     q: str,
     k: int = 10,
     scope: str = "all",
-    current_user: Optional[CurrentUser] = Depends(get_current_user)
+    current_user: Optional[CurrentUser] = Depends(get_current_user),
+    backend: SearchBackend = Depends(get_search_backend)
 ):
     """Search images with multi-tenant filtering.
     
@@ -463,30 +473,11 @@ async def search(
         raise HTTPException(401, "Authentication required for scope='" + scope + "'")
     
     t0 = time.time()
-    embedder = get_embedder()
-    q_vec = await embedder.embed_text(q)
-    store = get_vector_store()
-    
-    # Pass user context to vector store for filtering
-    user_id = current_user.id if current_user else None
-    results = await store.search(
-        query_vec=q_vec,
-        k=k,
-        text_query=q,
-        user_id=user_id,
-        scope=scope
-    )
-    
-    # Add direct storage URLs for fast client rendering
-    storage = get_image_storage()
-    for result in results:
-        image_id = result.get("id")
-        if image_id:
-            result["download_url"] = storage.get_image_url(image_id)
-            result["thumbnail_url"] = storage.get_thumbnail_url(image_id)
     
     try:
-        return {"query": q, "results": results}
+        user_id = current_user.id if current_user else None
+        query = SearchQuery(q=q, k=k, scope=scope, user_id=user_id)
+        return await backend.search(query)
     finally:
         try:
             LATENCY.observe(max(1.0, (time.time() - t0) * 1000.0))

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import declarative_base, mapped_column, relationship
-from sqlalchemy import Integer, String, Float, JSON, Text, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Integer, String, Float, JSON, Text, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import UUID, TSVECTOR
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
 import uuid
@@ -63,6 +63,13 @@ class ImageDoc(Base):
     deleted_at = mapped_column(DateTime, nullable=True, index=True)
     created_at = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Full-text search vector
+    search_vector = mapped_column(TSVECTOR)
+
+    __table_args__ = (
+        Index('ix_images_search_vector', 'search_vector', postgresql_using='gin'),
+    )
     
     # Relationship to owner
     owner = relationship("Profile", back_populates="images", foreign_keys=[owner_user_id])

@@ -79,6 +79,10 @@ class PgVectorStore:
             doc.embed_vector = img_vec
             doc.payload = payload
             
+            # Update search vector
+            from sqlalchemy import func
+            doc.search_vector = func.to_tsvector('english', caption)
+            
             # Update storage fields if provided
             if file_path is not None:
                 doc.file_path = file_path
@@ -181,21 +185,25 @@ class PgVectorStore:
                 boost_w = 0.2
 
             if hybrid:
+                # Hybrid search: Vector Cosine Similarity + TSVector Rank
+                # We normalize rank to be roughly [0,1] or just add it.
+                # ts_rank_cd usually returns values > 0.
+                
                 q = text(f"""
                     SELECT id, caption, caption_confidence, caption_origin,
                            (1 - (embed_vector <=> CAST(:qvec AS vector))) AS vec_score,
-                           CASE WHEN lower(caption) LIKE '%' || :qterm || '%' THEN :boost ELSE 0 END AS text_boost,
-                           ((1 - (embed_vector <=> CAST(:qvec AS vector))) +
-                            CASE WHEN lower(caption) LIKE '%' || :qterm || '%' THEN :boost ELSE 0 END) AS score
+                           ts_rank_cd(search_vector, websearch_to_tsquery('english', :qterm)) AS text_score,
+                           ((1 - (embed_vector <=> CAST(:qvec AS vector))) + 
+                            (:boost * ts_rank_cd(search_vector, websearch_to_tsquery('english', :qterm)))) AS score
                     FROM images
-                    WHERE {where_clause}
+                    WHERE {where_clause} 
                     ORDER BY score DESC
                     LIMIT :k
                 """)
-                params.update({"qterm": str(text_query).strip().lower(), "boost": boost_w})
+                params.update({"qterm": str(text_query).strip(), "boost": boost_w})
                 rows = s.execute(q, params).fetchall()
                 return [
-                    {"id": r.id, "caption": r.caption, "score": float(r.score)}
+                    {"id": r.id, "caption": r.caption, "score": float(r.score), "vec_score": float(r.vec_score), "text_score": float(r.text_score)}
                     for r in rows
                 ]
             else:
