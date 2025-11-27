@@ -1,13 +1,13 @@
 # AI Feature Router for Image Metadata
 
-Local‑first image captioning + semantic image/text search with a **cost/latency‑aware** cloud fallback. Built to demonstrate **AI integration, retrieval, and production‑grade engineering** with **multi-tenant authentication**.
+Local‑first image captioning + **Hybrid Search** (Vector + Keyword) with a **scalable Go microservice** for high-throughput retrieval. Built to demonstrate **AI integration, polyglot architecture, and production‑grade engineering**.
 
 ## Why this project
-- Show local vs cloud **policy routing** (confidence & SLO‑based)
-- Demonstrate **vector search** (pgvector or Qdrant)
-- Ship **observability** (Prometheus, Grafana, Jaeger) and **ADR**s
-- **Multi-tenant architecture** with Supabase authentication
-- **Privacy controls** - users can upload private or public images
+- **Scalable Search**: Dedicated **Go microservice** for high-performance hybrid search (pgvector + FTS).
+- **Smart Routing**: Local vs cloud **policy routing** for captioning (confidence & SLO‑based).
+- **Production Engineering**: **Shadow Mode** deployment, **Load Testing** (Locust), and **ADR**s.
+- **Observability**: Prometheus, Grafana, and Jaeger tracing across Python and Go services.
+- **Multi-tenant**: Supabase authentication with user-owned private/public images.
 
 ## Quick Start
 
@@ -65,19 +65,30 @@ See the [Frontend section](#frontend-nextjs-ui) below for detailed setup and fea
 See [S3_STORAGE_SETUP.md](S3_STORAGE_SETUP.md) for complete setup guide.
 
 ## Architecture
-- **FastAPI** gateway exposes `/images`, `/search`, `/metrics`
-- **Authentication**: **Supabase** JWT-based auth with user profiles
-- **Multi-tenant**: User-owned images with privacy controls (private/public)
-- **Captioner**: local **BLIP** first; **cloud** fallback (OpenAI/Gemini/Anthropic) via adapter
-- **Embedder**: **OpenCLIP** (or SigLIP) image+text encoders → vectors
-- **Vector store**: **pgvector** (HNSW) or **Qdrant**, selectable via env
+- **FastAPI** gateway: Handles writes, auth, and orchestrates requests.
+- **Go Search Service**: Dedicated microservice for high-performance read-only search.
+- **Authentication**: **Supabase** JWT-based auth with user profiles.
+- **Multi-tenant**: User-owned images with privacy controls (private/public).
+- **Captioner**: local **BLIP** first; **cloud** fallback (OpenAI/Gemini/Anthropic) via adapter.
+- **Embedder**: **OpenCLIP** (or SigLIP) image+text encoders → vectors.
+- **Vector store**: **pgvector** (HNSW) or **Qdrant**, selectable via env.
 
 ```
-[Client/UI] → Next.js (Supabase Auth) → FastAPI (JWT validation)
+[Client/UI] → Next.js (Supabase Auth) → FastAPI (Gateway)
                                       → (caption: BLIP → cloud?)
                                       → (embed: OpenCLIP)
+                                      → Go Search Service (Read Path)
                                       → Vector Store (pgvector/Qdrant)
                                       → Prometheus/Jaeger → Grafana
+
+## Go Search Service (New)
+To improve scalability and performance for read-heavy search traffic, we have introduced a dedicated **Go Search Service**.
+- **Role**: Handles `POST /search` requests (hybrid vector + keyword search).
+- **Stack**: Go 1.23, `pgx`, `pgvector`.
+- **Performance**: Lower tail latency (P99) and better resource efficiency than the Python baseline.
+- **Integration**: The Python API proxies search requests to this service when `SEARCH_BACKEND=go` is set.
+
+See [Scaling Go Search Service](docs/scaling_go_search.md) for detailed benchmarks.
 ```
 
 ## Endpoints
@@ -293,7 +304,9 @@ Generates:
 - Jaeger at http://localhost:16686
 
 ## ADRs
-See `docs/adr/0001-routing-policy.md` for "Local‑first with Confidence & SLO Overrides".
+- [0001-routing-policy.md](docs/adr/0001-routing-policy.md): Local-first with Confidence & SLO Overrides
+- [0002-python-to-go-migration.md](docs/adr/0002-python-to-go-migration.md): Migrating search path to Go
+- [0003-hybrid-search-implementation.md](docs/adr/0003-hybrid-search-implementation.md): Hybrid Search with pgvector + FTS
 
 ## Frontend (Next.js UI)
 Path: `apps/ui/`
