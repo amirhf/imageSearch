@@ -1,0 +1,13 @@
+# Build the Go Search Service image
+# Usage:
+#   gcloud builds submit \
+#     --config cloudbuild-go-search.yaml \
+#     --substitutions=_IMAGE=us-east1-docker.pkg.dev/PROJECT_ID/imagesearch/imagesearch-go:latest \
+#     .
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'services/search-go/Dockerfile', '-t', '$_IMAGE', 'services/search-go']
+
+images:
+  - '$_IMAGE'

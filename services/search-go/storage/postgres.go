@@ -72,12 +72,12 @@ func (s *PostgresStore) Search(ctx context.Context, req models.SearchRequest) ([
 		}
 		conditions = append(conditions, fmt.Sprintf("owner_user_id = '%s'", req.UserID))
 	} else if req.Scope == "public" {
-		conditions = append(conditions, "visibility = 'public'")
+		conditions = append(conditions, "visibility IN ('public', 'public_admin')")
 	} else { // all
 		if req.UserID != "" {
-			conditions = append(conditions, fmt.Sprintf("(visibility = 'public' OR owner_user_id = '%s')", req.UserID))
+			conditions = append(conditions, fmt.Sprintf("(visibility IN ('public', 'public_admin') OR owner_user_id = '%s')", req.UserID))
 		} else {
-			conditions = append(conditions, "visibility = 'public'")
+			conditions = append(conditions, "visibility IN ('public', 'public_admin')")
 		}
 	}
 

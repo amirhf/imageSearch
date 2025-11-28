@@ -18,12 +18,13 @@ from prometheus_client import (
 )
 
 from apps.api.schemas import SearchQuery
-from apps.api.deps import get_embedder, get_vector_store, get_image_storage
+from apps.api.deps import get_embedder, get_vector_store, get_image_storage, get_captioner
 from apps.api.services.embedder_client import EmbedderClient
 from apps.api.storage.pgvector_store import PgVectorStore
 from apps.api.services.image_storage import ImageStorage
 from apps.api.auth.dependencies import get_current_user, require_auth, require_admin
 from apps.api.auth.models import CurrentUser
+from apps.api.routing_policy import should_use_cloud
 
 # Disable automatic _created metrics to reduce noise in Grafana
 os.environ['PROMETHEUS_DISABLE_CREATED_SERIES'] = 'True'

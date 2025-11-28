@@ -1,19 +1,24 @@
 # FastAPI for Cloud Run (mock-mode by default)
-FROM python:3.11-slim AS base
+# FastAPI for Cloud Run (mock-mode by default)
+FROM python:3.11 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    OMP_NUM_THREADS=1 \
-    OPENBLAS_NUM_THREADS=1 \
-    MKL_NUM_THREADS=1
+  PYTHONUNBUFFERED=1 \
+  OMP_NUM_THREADS=1 \
+  OPENBLAS_NUM_THREADS=1 \
+  MKL_NUM_THREADS=1
 
 # Use repository root as workdir so imports like `apps.api.main` resolve
 WORKDIR /app
 
 # System deps (build-essential sometimes needed for psycopg extras)
+# libgl1/libglib2.0-0 needed for opencv/torchvision
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
+  build-essential \
+  curl \
+  libgl1 \
+  libglib2.0-0 \
+  liblzma-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # Install base requirements
@@ -23,8 +28,18 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Install ML model dependencies (Torch + transformers + open-clip)
 # These are needed for real captioning/embedding (USE_MOCK_MODELS=false)
 # Set USE_MOCK_MODELS=true in .env to skip using these at runtime
+ARG INSTALL_EMBEDDER=false
 COPY apps/api/requirements.models.txt /app/requirements.models.txt
-RUN pip install --no-cache-dir -r /app/requirements.models.txt
+COPY apps/api/requirements.embedder.txt /app/requirements.embedder.txt
+
+RUN if [ "$INSTALL_EMBEDDER" = "true" ]; then \
+  echo "Installing embedder-only dependencies (CPU optimized)..."; \
+  # Use CPU-only index to save space if possible, or just install from file
+  pip install --no-cache-dir -r /app/requirements.embedder.txt --extra-index-url https://download.pytorch.org/whl/cpu; \
+  else \
+  echo "Installing full model dependencies..."; \
+  pip install --no-cache-dir -r /app/requirements.models.txt; \
+  fi
 
 # Copy full repository (needed for package path `apps.api.*`)
 COPY . /app
