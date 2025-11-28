@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Request, Header, Response
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,11 +20,14 @@ from prometheus_client import (
 from apps.api.schemas import SearchQuery
 from apps.api.deps import get_embedder, get_vector_store, get_image_storage, get_captioner
 from apps.api.services.embedder_client import EmbedderClient
+from apps.api.services.captioner_client import CaptionerClient
 from apps.api.storage.pgvector_store import PgVectorStore
 from apps.api.services.image_storage import ImageStorage
 from apps.api.auth.dependencies import get_current_user, require_auth, require_admin
 from apps.api.auth.models import CurrentUser
+from apps.api.auth.models import CurrentUser
 from apps.api.routing_policy import should_use_cloud
+from apps.api.services.routing.router import AIFeatureRouter, RoutingContext, RoutingTier
 
 # Disable automatic _created metrics to reduce noise in Grafana
 os.environ['PROMETHEUS_DISABLE_CREATED_SERIES'] = 'True'
@@ -84,7 +87,7 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "x-client-caption", "x-client-confidence"],
     expose_headers=["*"]
 )
 
@@ -201,55 +204,74 @@ async def metrics():
 
 @app.post("/images")
 async def ingest_image(
-    file: Optional[UploadFile] = File(None),
-    url: Optional[str] = Form(None),
+    file: UploadFile = File(...),
     visibility: str = Form("private"),
-    current_user: CurrentUser = Depends(require_auth)
+    current_user: CurrentUser = Depends(require_auth),
+    captioner: CaptionerClient = Depends(get_captioner),
+    embedder: EmbedderClient = Depends(get_embedder),
+    storage: ImageStorage = Depends(get_image_storage),
+    x_client_caption: Optional[str] = Header(None),
+    x_client_confidence: Optional[float] = Header(None)
 ):
     import traceback
     try:
         t0 = time.time()
-        if not file and not url:
-            raise HTTPException(400, "Provide either url or file")
-
         # Load bytes
-        if file:
-            img_bytes = await file.read()
-            src = {"source": "upload", "filename": file.filename}
-        else:
-            import httpx
-            async with httpx.AsyncClient(timeout=20) as client:
-                r = await client.get(url)
-                r.raise_for_status()
-                img_bytes = r.content
-            src = {"source": "url", "url": url}
+        print(f"DEBUG: ingest_image headers: x_client_caption={x_client_caption}, x_client_confidence={x_client_confidence}")
+        img_bytes = await file.read()
+        src = {"source": "upload", "filename": file.filename}
 
         image_id = hashlib.sha256(img_bytes).hexdigest()[:16]
 
-        # Save image to storage
-        storage = get_image_storage()
+        # 1. Local Caption (always run for fallback/metrics)
+        local_caption, local_conf, local_ms = await captioner.caption(img_bytes)
 
-        # Caption (local first, maybe fallback)
-        captioner = get_captioner()
-        local_caption, conf, local_ms = await captioner.caption(img_bytes)
-
-        # Evaluate routing
-        use_cloud = should_use_cloud(confidence=conf, local_latency_ms=local_ms)
+        # 2. Route Request (Tier 1/2/3/4)
+        # We pass the client caption as a hint to the router
+        router = AIFeatureRouter()
         try:
-            conf_t = float(os.getenv("CAPTION_CONFIDENCE_THRESHOLD", 0.55))
             budget_ms = int(os.getenv("CAPTION_LATENCY_BUDGET_MS", 600))
         except Exception:
-            conf_t, budget_ms = 0.55, 600
-        logger.info(
-            f"routing_decision: conf={conf:.3f} (thr={conf_t}), local_ms={local_ms} (budget={budget_ms}), use_cloud={use_cloud}",
-            extra={"confidence": conf, "local_latency_ms": local_ms, "budget_ms": budget_ms}
+            budget_ms = 600
+            
+        routing_decision = await router.route_caption_request(
+            image_bytes=img_bytes,
+            context=RoutingContext(latency_budget_ms=budget_ms),
+            text_hint=x_client_caption,
+            client_confidence=x_client_confidence
         )
-
-        caption = local_caption
+        
+        tier = routing_decision.tier
+        caption = local_caption # Default to local caption
         origin = "local"
-
-        if use_cloud:
-            logger.info("routing: attempting cloud caption", extra={"use_cloud": use_cloud})
+        conf = local_conf
+        
+        use_cloud = routing_decision.tier == RoutingTier.CLOUD
+        use_cache = routing_decision.tier == RoutingTier.CACHE
+        use_edge = routing_decision.tier == RoutingTier.EDGE
+        
+        logger.info(
+            f"routing_decision: tier={routing_decision.tier} reason={routing_decision.reason}",
+            extra={"tier": routing_decision.tier, "reason": routing_decision.reason}
+        )
+        
+        if use_cache:
+            # Cache hit!
+            logger.info("routing: cache hit", extra={"tier": "cache"})
+            cached = routing_decision.metadata.get("cached_result", {})
+            caption = cached.get("caption", local_caption)
+            origin = cached.get("origin", "cache")
+            conf = cached.get("confidence", 1.0)
+            
+        elif use_edge:
+            # Edge accepted!
+            logger.info("routing: edge accepted", extra={"tier": "edge"})
+            caption = x_client_caption
+            origin = "edge"
+            conf = x_client_confidence or 1.0
+            
+        elif use_cloud:
+            logger.info("routing: attempting cloud caption", extra={"use_cloud": True})
             cloud_caption, cloud_ms, cost_usd = await captioner.caption_cloud(img_bytes)
             if cloud_caption:
                 caption = cloud_caption
@@ -259,9 +281,15 @@ async def ingest_image(
                     f"routing: cloud_success latency_ms={cloud_ms} cost_usd={cost_usd}",
                     extra={"cloud_latency_ms": cloud_ms, "cost_usd": cost_usd}
                 )
+                # Store in cache
+                await router.cache.store(img_bytes, {
+                    "caption": caption,
+                    "confidence": 1.0, # Cloud is high conf
+                    "origin": "cloud"
+                })
             else:
                 ROUTED_LOCAL.inc()  # fallback failed → keep local
-                logger.warning("routing: cloud_fallback_failed; using local caption", extra={"use_cloud": use_cloud})
+                logger.warning("routing: cloud_fallback_failed; using local caption", extra={"use_cloud": True})
         else:
             ROUTED_LOCAL.inc()
 
@@ -313,7 +341,12 @@ async def ingest_image(
         }
     except HTTPException:
         raise
+        raise HTTPException(500, f"Internal error: {str(e)}")
     except Exception as e:
+        import traceback
+        with open("/tmp/api_error.log", "w") as f:
+            f.write(f"Error: {str(e)}\n")
+            traceback.print_exc(file=f)
         print(f"ERROR in ingest_image: {e}")
         traceback.print_exc()
         raise HTTPException(500, f"Internal error: {str(e)}")

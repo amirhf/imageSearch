@@ -8,15 +8,20 @@ import ImageMasonry from '@/components/ImageMasonry'
 import DetailSheet from '@/components/DetailSheet'
 import { searchImages } from '@/lib/api'
 
+import { useAuth } from '@/lib/auth/AuthContext'
+
 export default function HomeClient() {
+  const { user, session } = useAuth()
   const sp = useSearchParams()
   const q = sp.get('q') || ''
   const k = Number(sp.get('k') || '10')
 
+  const scope = user ? 'all' : 'public'
+
   const enabled = q.trim().length > 0
   const { data, isFetching, isError } = useQuery({
-    queryKey: ['search', q, k],
-    queryFn: () => searchImages(q, k),
+    queryKey: ['search', q, k, scope, session?.access_token],
+    queryFn: () => searchImages(q, k, scope, session?.access_token),
     enabled
   })
 
@@ -51,4 +56,5 @@ export default function HomeClient() {
 
       <DetailSheet id={openId} onClose={() => setOpenId(null)} />
     </main>
-  )}
+  )
+}

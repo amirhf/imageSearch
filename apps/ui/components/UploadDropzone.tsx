@@ -4,6 +4,11 @@ import { useRouter } from 'next/navigation'
 import { uploadImage } from '@/lib/api'
 import { useAuth } from '@/lib/auth/AuthContext'
 import { createClient } from '@/lib/supabase/client'
+import { pipeline, env } from '@xenova/transformers'
+
+// Configure Transformers.js to use CDN
+env.allowLocalModels = false
+env.useBrowserCache = true
 
 export default function UploadDropzone() {
   const router = useRouter()
@@ -14,6 +19,9 @@ export default function UploadDropzone() {
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [captioning, setCaptioning] = useState(false)
+  const [edgeCaption, setEdgeCaption] = useState<{ text: string, score: number } | null>(null)
+  const [rejected, setRejected] = useState(false)
   const [progress, setProgress] = useState<number | null>(null) // 0-100 for file uploads
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -26,18 +34,18 @@ export default function UploadDropzone() {
     }
     try {
       setLoading(true)
-      
+
       // Get auth token
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
-      
+
       if (!token) {
         setError('You must be logged in to upload images')
         setLoading(false)
         return
       }
-      
+
       // If a file is present, use XHR to track upload progress
       if (file) {
         const form = new FormData()
@@ -49,6 +57,17 @@ export default function UploadDropzone() {
           const xhr = new XMLHttpRequest()
           xhr.open('POST', '/api/images', true)
           xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+          // Add Edge Caption headers if available
+          if (edgeCaption) {
+            console.log("DEBUG: Sending Edge Caption headers", edgeCaption)
+            // Ensure no newlines in header values
+            const cleanCaption = edgeCaption.text.replace(/[\r\n]+/g, ' ').trim()
+            xhr.setRequestHeader('x-client-caption', cleanCaption)
+            xhr.setRequestHeader('x-client-confidence', edgeCaption.score.toString())
+          } else {
+            console.log("DEBUG: No Edge Caption available to send")
+          }
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) {
               const pct = Math.round((ev.loaded / ev.total) * 100)
@@ -95,7 +114,51 @@ export default function UploadDropzone() {
     e.preventDefault()
     setDragOver(false)
     const f = e.dataTransfer.files?.[0]
-    if (f) setFile(f)
+    if (f) {
+      setFile(f)
+      setRejected(false)
+      generateCaption(f)
+    }
+  }
+
+  async function generateCaption(file: File) {
+    try {
+      setCaptioning(true)
+      const captioner = await pipeline('image-to-text', 'Xenova/vit-gpt2-image-captioning')
+      const url = URL.createObjectURL(file)
+      const output = await captioner(url)
+      // output is [{ generated_text: "..." }]
+      const result = output as any
+      if (result && result[0] && result[0].generated_text) {
+        const text = result[0].generated_text
+        const score = calculateConfidence(text)
+        setEdgeCaption({ text, score })
+      }
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error("Edge captioning failed", e)
+    } finally {
+      setCaptioning(false)
+    }
+  }
+
+  function calculateConfidence(caption: string): number {
+    let score = 0.8 // Base score
+
+    // 1. Length Bonus: Very short captions are often poor
+    const words = caption.split(' ')
+    if (words.length > 5) score += 0.1
+    if (words.length < 3) score -= 0.2
+
+    // 2. Repetition Penalty: "a cat and a cat" is a common failure mode
+    const uniqueWords = new Set(words.map(w => w.toLowerCase()))
+    if (uniqueWords.size < words.length * 0.6) score -= 0.3
+
+    // 3. Generic Penalty: Downweight vague captions
+    const genericPhrases = ['image of', 'picture of', 'a group of', 'standing in front of']
+    if (genericPhrases.some(p => caption.includes(p))) score -= 0.1
+
+    return Math.min(Math.max(score, 0.1), 0.99)
   }
 
   return (
@@ -120,7 +183,38 @@ export default function UploadDropzone() {
             Choose file
           </button>
           {file && (
-            <div className="text-xs text-neutral-600">Selected: {file.name}</div>
+            <div className="text-xs text-neutral-600 mt-2">
+              <div>Selected: {file.name}</div>
+              {captioning && <div className="text-blue-600 mt-1">Generating edge caption...</div>}
+
+              {edgeCaption && !rejected && (
+                <div className="mt-2 rounded bg-neutral-50 p-3 text-left border border-neutral-200">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-neutral-900">Edge Analysis</span>
+                    <span className="text-xs text-neutral-500" title="Confidence Score">
+                      {(edgeCaption.score * 100).toFixed(1)}% confidence
+                    </span>
+                  </div>
+                  <p className="text-sm text-neutral-700 italic">"{edgeCaption.text}"</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEdgeCaption(null)
+                      setRejected(true)
+                    }}
+                    className="text-xs text-red-600 hover:text-red-700 mt-2 hover:underline"
+                  >
+                    Reject (Use Server Captioning)
+                  </button>
+                </div>
+              )}
+
+              {rejected && (
+                <div className="mt-2 text-xs text-neutral-500 italic">
+                  Edge caption rejected. Image will be captioned by the server.
+                </div>
+              )}
+            </div>
           )}
         </div>
         <input
@@ -128,7 +222,12 @@ export default function UploadDropzone() {
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null
+            setFile(f)
+            setRejected(false)
+            if (f) generateCaption(f)
+          }}
           aria-label="File chooser"
         />
       </div>
@@ -142,7 +241,7 @@ export default function UploadDropzone() {
           aria-label="Image URL"
           disabled={loading}
         />
-        
+
         {/* Visibility Selector */}
         <div className="flex items-center gap-4">
           <label className="text-sm font-medium text-neutral-700">Visibility:</label>
@@ -173,13 +272,13 @@ export default function UploadDropzone() {
             </label>
           </div>
         </div>
-        
+
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || captioning}
           className="w-full rounded-md bg-neutral-900 px-4 py-2 text-white hover:bg-neutral-800 disabled:opacity-60"
         >
-          {loading ? 'Uploading…' : 'Upload'}
+          {loading ? 'Uploading…' : captioning ? 'Analyzing image...' : 'Upload'}
         </button>
       </div>
 

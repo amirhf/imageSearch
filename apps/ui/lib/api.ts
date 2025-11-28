@@ -1,10 +1,17 @@
 import { ImageDetail, SearchResponse } from './types'
 
-export async function searchImages(q: string, k = 10): Promise<SearchResponse> {
+export async function searchImages(q: string, k = 10, scope = 'public', token?: string): Promise<SearchResponse> {
   const url = new URL('/api/search', typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
   url.searchParams.set('q', q)
   url.searchParams.set('k', String(k))
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  url.searchParams.set('scope', scope)
+
+  const headers: HeadersInit = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(url.toString(), { cache: 'no-store', headers })
   if (!res.ok) throw new Error(`Search failed: ${res.status}`)
   return res.json()
 }
@@ -24,18 +31,18 @@ export async function uploadImage(
   if (input.file) form.set('file', input.file, input.file.name)
   if (input.visibility) form.set('visibility', input.visibility)
   if (!form.has('url') && !form.has('file')) throw new Error('Provide url or file')
-  
+
   const headers: HeadersInit = {}
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
-  
-  const res = await fetch('/api/images', { 
-    method: 'POST', 
+
+  const res = await fetch('/api/images', {
+    method: 'POST',
     body: form,
-    headers 
+    headers
   })
-  
+
   if (res.status === 401) {
     throw new Error('Authentication required. Please log in.')
   }
@@ -45,6 +52,6 @@ export async function uploadImage(
   if (!res.ok) {
     throw new Error(`Upload failed: ${res.status}`)
   }
-  
+
   return res.json()
 }

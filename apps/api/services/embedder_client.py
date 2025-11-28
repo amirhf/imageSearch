@@ -2,6 +2,17 @@ import numpy as np
 from PIL import Image
 import io
 import os
+import sys
+
+# Monkeypatch lzma if missing (common on some python builds)
+try:
+    import lzma
+except ImportError:
+    try:
+        from backports import lzma
+        sys.modules['lzma'] = lzma
+    except ImportError:
+        pass
 
 try:
     import open_clip

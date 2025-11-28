@@ -4,7 +4,7 @@ import { API_BASE } from '@/lib/config'
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    
+
     // Forward authorization header if present
     const authHeader = req.headers.get('authorization')
     const headers: HeadersInit = {}
@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
     const headers: HeadersInit = {}
     if (authHeader) {
       headers['Authorization'] = authHeader
+    }
+
+    // Forward client caption headers
+    const clientCaption = req.headers.get('x-client-caption')
+    const clientConfidence = req.headers.get('x-client-confidence')
+
+    if (clientCaption) {
+      headers['x-client-caption'] = clientCaption
+    }
+    if (clientConfidence) {
+      headers['x-client-confidence'] = clientConfidence
     }
 
     const upstream = await fetch(`${API_BASE}/images`, { method: 'POST', body: out, headers })

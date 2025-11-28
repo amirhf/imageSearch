@@ -121,6 +121,8 @@ class S3Storage(ImageStorage):
         orig_buffer = io.BytesIO()
         save_kwargs = {}
         if format_str in ('jpeg', 'jpg'):
+            if img.mode == 'RGBA':
+                img = img.convert('RGB')
             save_kwargs = {"quality": 95, "optimize": True}
         img.save(orig_buffer, format=format_str.upper(), **save_kwargs)
         orig_bytes = orig_buffer.getvalue()
