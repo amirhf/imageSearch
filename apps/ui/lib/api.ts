@@ -46,7 +46,10 @@ export async function uploadImage(
   }
 
   // Upload directly to backend to bypass Vercel 4.5MB limit
-  const res = await fetch(`${API_BASE}/images`, {
+  const uploadUrl = `${API_BASE}/images`
+  console.log('[DEBUG] Uploading to:', uploadUrl)
+
+  const res = await fetch(uploadUrl, {
     method: 'POST',
     body: form,
     headers

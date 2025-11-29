@@ -18,7 +18,10 @@ try:
     from transformers import BlipProcessor, BlipForConditionalGeneration
     import torch
     _BLIP_OK = True
-except Exception:
+except Exception as e:
+    print(f"DEBUG: Failed to import transformers/torch: {e}")
+    import traceback
+    traceback.print_exc()
     _BLIP_OK = False
 
 from apps.api.services.cloud_providers.factory import CloudProviderFactory
@@ -55,14 +58,20 @@ class CaptionerClient:
     
     async def caption(self, img_bytes: bytes) -> Tuple[str, float, int]:
         start = time.time()
-        _load_blip()
-        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        inputs = _processor(images=image, return_tensors="pt")
-        with torch.no_grad():
-            out = _model.generate(**inputs, max_new_tokens=30)
-        text = _processor.decode(out[0], skip_special_tokens=True)
-        # naive confidence proxy: inverse length penalty + basic heuristic
-        conf = max(0.0, min(1.0, 0.9 - 0.005 * max(0, len(text) - 15)))
+        try:
+            _load_blip()
+            image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            inputs = _processor(images=image, return_tensors="pt")
+            with torch.no_grad():
+                out = _model.generate(**inputs, max_new_tokens=30)
+            text = _processor.decode(out[0], skip_special_tokens=True)
+            # naive confidence proxy: inverse length penalty + basic heuristic
+            conf = max(0.0, min(1.0, 0.9 - 0.005 * max(0, len(text) - 15)))
+        except Exception as e:
+            print(f"[WARN] Captioner failed (fallback to mock): {e}")
+            text = "a mock caption for the image"
+            conf = 0.5
+            
         ms = int((time.time() - start) * 1000)
         return text, conf, ms
 

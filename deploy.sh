@@ -48,7 +48,7 @@ echo "Go Service deployed at: $GO_SERVICE_URL"
 # 3. Build and Deploy Python API
 echo "Building Python API..."
 gcloud builds submit \
-  --config cloudbuild-api-embedder.yaml \
+  --config cloudbuild-api.yaml \
   --substitutions=_IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$PYTHON_SERVICE:latest \
   .
 

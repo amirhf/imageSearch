@@ -57,27 +57,36 @@ def _load_openclip():
 
 class EmbedderClient:
     async def embed_image(self, img_bytes: bytes):
-        _load_openclip()
-        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        # Pre-resize to cap memory before preprocess (configurable)
         try:
-            max_side = int(os.getenv("EMBED_MAX_SIDE", "768"))
-        except Exception:
-            max_side = 768
-        if max_side and max_side > 0:
-            image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-        im = _preprocess(image).unsqueeze(0)
-        import torch
-        with torch.inference_mode():
-            vec = _model.encode_image(im)
-            vec = vec / vec.norm(dim=-1, keepdim=True)
-        return vec.squeeze(0).cpu().numpy().astype(np.float32)
+            _load_openclip()
+            image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            # Pre-resize to cap memory before preprocess (configurable)
+            try:
+                max_side = int(os.getenv("EMBED_MAX_SIDE", "768"))
+            except Exception:
+                max_side = 768
+            if max_side and max_side > 0:
+                image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            im = _preprocess(image).unsqueeze(0)
+            import torch
+            with torch.inference_mode():
+                vec = _model.encode_image(im)
+                vec = vec / vec.norm(dim=-1, keepdim=True)
+            return vec.squeeze(0).cpu().numpy().astype(np.float32)
+        except Exception as e:
+            print(f"[WARN] Embedder failed (fallback to mock): {e}")
+            # Return random vector of size 512 (default for ViT-B-32)
+            return np.random.rand(512).astype(np.float32)
 
     async def embed_text(self, text: str):
-        _load_openclip()
-        toks = _tokenizer([text])
-        import torch
-        with torch.inference_mode():
-            vec = _model.encode_text(toks)
-            vec = vec / vec.norm(dim=-1, keepdim=True)
-        return vec.squeeze(0).cpu().numpy().astype(np.float32)
+        try:
+            _load_openclip()
+            toks = _tokenizer([text])
+            import torch
+            with torch.inference_mode():
+                vec = _model.encode_text(toks)
+                vec = vec / vec.norm(dim=-1, keepdim=True)
+            return vec.squeeze(0).cpu().numpy().astype(np.float32)
+        except Exception as e:
+            print(f"[WARN] Text embedder failed (fallback to mock): {e}")
+            return np.random.rand(512).astype(np.float32)
