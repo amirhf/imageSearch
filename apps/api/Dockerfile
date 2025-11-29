@@ -1,6 +1,7 @@
 # FastAPI for Cloud Run (mock-mode by default)
 # FastAPI for Cloud Run (mock-mode by default)
 FROM python:3.11 AS base
+# force rebuild
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \

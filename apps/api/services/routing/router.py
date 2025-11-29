@@ -35,7 +35,7 @@ class AIFeatureRouter:
     
     def __init__(self):
         from apps.api.services.routing.classifiers.complexity import ComplexityClassifier
-        from apps.api.services.routing.tiers.cache_tier import SemanticCache
+        from apps.api.services.routing.tiers.redis_cache import SemanticCache
         import os
         
         self.classifier = ComplexityClassifier()

@@ -1,10 +1,10 @@
 import json
-# force update
 import time
 import hashlib
 import logging
 from typing import Optional, Dict, Any, List
 import numpy as np
+
 try:
     from redis import asyncio as aioredis
     REDIS_AVAILABLE = True
