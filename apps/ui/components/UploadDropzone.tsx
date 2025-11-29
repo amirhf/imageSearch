@@ -1,14 +1,11 @@
 "use client"
 import { useState, useRef, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { uploadImage } from '@/lib/api'
 import { API_BASE } from '@/lib/config'
 
 // ... (inside component)
 
-const xhr = new XMLHttpRequest()
-const uploadUrl = `${API_BASE}/images`
-console.log('[DEBUG] Dropzone uploading to:', uploadUrl)
-xhr.open('POST', uploadUrl, true)
 import { useAuth } from '@/lib/auth/AuthContext'
 import { createClient } from '@/lib/supabase/client'
 import { pipeline, env } from '@xenova/transformers'
