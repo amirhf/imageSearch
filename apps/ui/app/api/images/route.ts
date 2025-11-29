@@ -41,13 +41,12 @@ export async function POST(req: NextRequest) {
     if (clientConfidence) headers['x-client-confidence'] = clientConfidence
 
     // 4. Stream body directly to upstream
-    // @ts-ignore - duplex is required for streaming bodies in node fetch but TS might complain
     const upstream = await fetch(`${API_BASE}/images`, {
       method: 'POST',
       body: req.body,
       headers,
       duplex: 'half'
-    })
+    } as any)
 
     const text = await upstream.text()
     return new NextResponse(text, { status: upstream.status, headers: { 'content-type': 'application/json' } })
