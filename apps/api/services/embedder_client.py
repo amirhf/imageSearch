@@ -4,21 +4,29 @@ import io
 import os
 import sys
 
-# Monkeypatch lzma if missing (common on some python builds)
+# Monkeypatch lzma if missing or broken (common on some python builds)
 try:
     import lzma
+    # Check if lzma is actually working (has 'open' attribute)
+    if not hasattr(lzma, 'open'):
+        raise ImportError("lzma module is broken (missing 'open')")
 except ImportError:
     try:
         from backports import lzma
         sys.modules['lzma'] = lzma
+        print("INFO: Monkeypatched lzma with backports.lzma")
     except ImportError:
+        print("WARN: Failed to monkeypatch lzma (backports.lzma not found)")
         pass
 
 try:
     import open_clip
     import torch
     _OK = True
-except Exception:
+except Exception as e:
+    print(f"CRITICAL: Failed to import open_clip/torch: {e}")
+    import traceback
+    traceback.print_exc()
     _OK = False
 
 _model = None

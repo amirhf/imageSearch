@@ -87,7 +87,14 @@ class AIFeatureRouter:
                 
                 edge_conf = client_confidence or 0.0
                 print(f"DEBUG: text_hint='{text_hint}', conf={edge_conf}, complexity={complexity.level}")
-                if edge_conf > 0.8 and complexity.level == "simple":
+                
+                # Accept if Simple OR (Moderate and High Confidence)
+                is_acceptable = (
+                    complexity.level == "simple" or 
+                    (complexity.level == "moderate" and edge_conf > 0.8)
+                )
+                
+                if edge_conf > 0.8 and is_acceptable:
                     ROUTING_DECISIONS.labels(tier="edge", reason="accepted").inc()
                     return RoutingDecision(
                         tier=RoutingTier.EDGE,
