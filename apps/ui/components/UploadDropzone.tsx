@@ -99,7 +99,11 @@ export default function UploadDropzone() {
       } else {
         // URL-only: small payload; use fetch and show indeterminate progress UI
         setProgress(-1) // signal indeterminate
-        const res = await uploadImage({ url, visibility }, token)
+        const res = await uploadImage({
+          url,
+          visibility,
+          edgeCaption: edgeCaption || undefined
+        }, session?.access_token)
         router.push(`/image/${res.id}`)
       }
     } catch (err: any) {

@@ -22,8 +22,10 @@ export async function getImage(id: string): Promise<ImageDetail> {
   return res.json()
 }
 
+import { API_BASE } from './config'
+
 export async function uploadImage(
-  input: { url?: string; file?: File; visibility?: string },
+  input: { url?: string; file?: File; visibility?: string; edgeCaption?: { text: string; score: number } },
   token?: string
 ): Promise<ImageDetail> {
   const form = new FormData()
@@ -37,7 +39,14 @@ export async function uploadImage(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const res = await fetch('/api/images', {
+  // Add Edge Caption headers if available
+  if (input.edgeCaption) {
+    headers['x-client-caption'] = input.edgeCaption.text.replace(/[\r\n]+/g, ' ').trim()
+    headers['x-client-confidence'] = input.edgeCaption.score.toString()
+  }
+
+  // Upload directly to backend to bypass Vercel 4.5MB limit
+  const res = await fetch(`${API_BASE}/images`, {
     method: 'POST',
     body: form,
     headers
@@ -50,7 +59,8 @@ export async function uploadImage(
     throw new Error('You do not have permission to perform this action')
   }
   if (!res.ok) {
-    throw new Error(`Upload failed: ${res.status}`)
+    const err = await res.text()
+    throw new Error(`Upload failed: ${res.status} ${err}`)
   }
 
   return res.json()
