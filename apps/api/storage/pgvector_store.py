@@ -103,6 +103,9 @@ class PgVectorStore:
             if visibility is not None:
                 doc.visibility = visibility
             
+            # Revive soft-deleted images if re-uploaded
+            doc.deleted_at = None
+            
             s.add(doc)
             s.commit()
 

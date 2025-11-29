@@ -59,7 +59,9 @@ export default function UploadDropzone() {
 
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest()
-          xhr.open('POST', '/api/images', true)
+          const uploadUrl = `${API_BASE}/images`
+          console.log('[DEBUG] Dropzone uploading to:', uploadUrl)
+          xhr.open('POST', uploadUrl, true)
           xhr.setRequestHeader('Authorization', `Bearer ${token}`)
 
           // Add Edge Caption headers if available
