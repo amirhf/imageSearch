@@ -374,39 +374,41 @@ All proxy routes automatically forward the `Authorization` header from Supabase:
   ```
 - Tailwind warning about `@tailwindcss/line-clamp`: remove the plugin from `tailwind.config.ts` (included by default in v3.3+).
 
-## Production Deployment
+## Production Deployment (Hybrid Architecture)
 
-### Backend (Google Cloud Run)
+We use a **Hybrid Deployment** strategy to balance scalability and cost:
+-   **API & Search Service:** Google Cloud Run (Serverless, scales to zero).
+-   **Worker & Redis:** Google Compute Engine (VM, cost-effective for always-on background tasks).
+
+See [docs/architecture.md](docs/architecture.md) for the detailed architecture diagram.
+
+### 1. Prerequisites
+-   Google Cloud Project with Billing enabled.
+-   `gcloud` CLI installed and authenticated.
+-   `.env.production` file with production secrets.
+
+### 2. Deploy Worker VM (Redis + Ingestion Worker)
+This script provisions a small VM (`e2-small`), installs Docker, and deploys Redis and the Ingestion Worker.
 ```bash
-# Build with embedder support
-gcloud builds submit --config cloudbuild-api-embedder.yaml \
-  --substitutions=_IMAGE=us-east1-docker.pkg.dev/PROJECT_ID/REPO/imagesearch-api:latest
+./scripts/deploy_worker.sh
+```
+*Note: This script outputs the VM's public IP and Redis password. Ensure these are updated in your `.env.production`.*
 
-# Deploy with environment variables
-gcloud run deploy imagesearch-api \
-  --image us-east1-docker.pkg.dev/PROJECT_ID/REPO/imagesearch-api:latest \
-  --region us-east1 \
-  --update-env-vars="SUPABASE_URL=...,SUPABASE_JWT_SECRET=...,..."
+### 3. Deploy Cloud Run Services (API + Go Search)
+This script builds and deploys the stateless services to Cloud Run, connecting them to the Worker VM's Redis.
+```bash
+./deploy.sh
 ```
 
-### Frontend (Vercel)
+### 4. Frontend (Vercel)
+Deploy the Next.js frontend to Vercel:
 ```bash
 cd apps/ui
 vercel --prod
-
-# Or configure via Vercel dashboard:
-# - Link GitHub repository
-# - Set environment variables (NEXT_PUBLIC_SUPABASE_URL, etc.)
-# - Enable automatic deployments
 ```
+*Ensure you set the `NEXT_PUBLIC_API_BASE` environment variable in Vercel to your Cloud Run API URL.*
 
-### Database (Neon/Supabase/Cloud SQL)
-- Run migrations on production database
-- Configure connection pooling
-- Enable SSL/TLS
-- Set up backups
-
-See `docs/multi_tenant/DEPLOYMENT_CHECKLIST.md` for complete production deployment guide.
+See `docs/multi_tenant/DEPLOYMENT_CHECKLIST.md` for a complete checklist.
 
 ## License
 MIT (sample) – replace or update as you prefer.

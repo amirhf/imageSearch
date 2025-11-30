@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - worker_net
+
+  ingestion-worker:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    command: python -m workers.ingestion.worker
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - DATABASE_URL=${DATABASE_URL}
+      - IMAGE_STORAGE_BACKEND=s3
+      - WORKER_CONCURRENCY=2
+    depends_on:
+      - redis
+    restart: always
+    networks:
+      - worker_net
+
+volumes:
+  redis_data:
+
+
+networks:
+  worker_net:
+    driver: bridge
