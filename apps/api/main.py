@@ -85,6 +85,7 @@ app.add_middleware(
         "http://localhost:3000",  # Alternative port
         os.getenv("FRONTEND_URL", "http://localhost:3100")
     ],
+    allow_origin_regex=r"https://image-search-.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*", "x-client-caption", "x-client-confidence"],
