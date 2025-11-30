@@ -33,7 +33,10 @@ ARG INSTALL_EMBEDDER=false
 COPY apps/api/requirements.models.txt /app/requirements.models.txt
 COPY apps/api/requirements.embedder.txt /app/requirements.embedder.txt
 
-RUN if [ "$INSTALL_EMBEDDER" = "true" ]; then \
+ARG SKIP_MODELS=false
+RUN if [ "$SKIP_MODELS" = "true" ]; then \
+  echo "Skipping model dependencies (using external APIs only)..."; \
+  elif [ "$INSTALL_EMBEDDER" = "true" ]; then \
   echo "Installing embedder-only dependencies (CPU optimized)..."; \
   # Use CPU-only index to save space if possible, or just install from file
   pip install --no-cache-dir -r /app/requirements.embedder.txt --extra-index-url https://download.pytorch.org/whl/cpu; \

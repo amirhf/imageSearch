@@ -68,7 +68,13 @@ class CaptionerClient:
             # naive confidence proxy: inverse length penalty + basic heuristic
             conf = max(0.0, min(1.0, 0.9 - 0.005 * max(0, len(text) - 15)))
         except Exception as e:
-            print(f"[WARN] Captioner failed (fallback to mock): {e}")
+            print(f"[WARN] Local captioner failed/disabled: {e}")
+            # Fallback to cloud
+            cloud_caption, _, _ = await self.caption_cloud(img_bytes)
+            if cloud_caption:
+                return cloud_caption, 1.0, int((time.time() - start) * 1000)
+            
+            print(f"[WARN] Cloud captioner also failed (fallback to mock)")
             text = "a mock caption for the image"
             conf = 0.5
             

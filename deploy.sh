@@ -81,8 +81,8 @@ gcloud run deploy $PYTHON_SERVICE \
   --update-env-vars CAPTION_LATENCY_BUDGET_MS="$CAPTION_LATENCY_BUDGET_MS" \
   --update-env-vars HYBRID_TEXT_BOOST="$HYBRID_TEXT_BOOST" \
   --update-env-vars HYBRID_TEXT_WEIGHT="$HYBRID_TEXT_WEIGHT" \
-  --update-env-vars USE_REAL_EMBEDDER="$USE_REAL_EMBEDDER" \
-  --update-env-vars USE_REAL_CAPTIONER="$USE_REAL_CAPTIONER" \
+  --update-env-vars USE_REAL_EMBEDDER=true \
+  --update-env-vars USE_REAL_CAPTIONER=false \
   --update-env-vars EMBED_MAX_SIDE="$EMBED_MAX_SIDE" \
   --update-env-vars TORCH_NUM_THREADS="$TORCH_NUM_THREADS" \
   --update-env-vars TORCH_NUM_INTEROP_THREADS="$TORCH_NUM_INTEROP_THREADS" \
@@ -92,7 +92,9 @@ gcloud run deploy $PYTHON_SERVICE \
   --update-env-vars SUPABASE_JWT_SECRET="$SUPABASE_JWT_SECRET" \
   --update-env-vars SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" \
   --update-env-vars SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
-  --update-env-vars ADMIN_USER_ID="$ADMIN_USER_ID"
+  --update-env-vars ADMIN_USER_ID="$ADMIN_USER_ID" \
+  --update-env-vars REDIS_URL="$REDIS_URL" \
+  --update-env-vars REDIS_PASSWORD="$REDIS_PASSWORD"
 
 echo "Deployment Complete!"
 echo "Python API: $(gcloud run services describe $PYTHON_SERVICE --region $REGION --format 'value(status.url)')"
