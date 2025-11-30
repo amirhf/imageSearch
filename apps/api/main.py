@@ -92,6 +92,9 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+from apps.api.routes import async_jobs
+app.include_router(async_jobs.router)
+
 class ImageIn(BaseModel):
     url: Optional[str] = None
 

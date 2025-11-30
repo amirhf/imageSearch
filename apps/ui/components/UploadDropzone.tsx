@@ -1,12 +1,13 @@
 "use client"
 import { useState, useRef, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { uploadImage } from '@/lib/api'
+import { uploadImage, uploadImageAsync, getJobStatus } from '@/lib/api'
 import { API_BASE } from '@/lib/config'
 
 // ... (inside component)
 
 import { useAuth } from '@/lib/auth/AuthContext'
+import { useJobs } from '@/lib/context/JobContext'
 import { createClient } from '@/lib/supabase/client'
 import { pipeline, env } from '@xenova/transformers'
 
@@ -17,6 +18,7 @@ env.useBrowserCache = true
 export default function UploadDropzone() {
   const router = useRouter()
   const { user } = useAuth()
+  const { addJob } = useJobs()
   const [url, setUrl] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [visibility, setVisibility] = useState<'private' | 'public'>('private')
@@ -50,7 +52,36 @@ export default function UploadDropzone() {
         return
       }
 
-      // If a file is present, use XHR to track upload progress
+      // Use Async Upload for better UX
+      const useAsync = true // Can be toggled or based on file size
+
+      if (useAsync) {
+        setLoading(true)
+        setProgress(10)
+
+        const res = await uploadImageAsync({
+          url,
+          file: file || undefined,
+          visibility,
+          edgeCaption: edgeCaption || undefined
+        }, token)
+
+        // Add to global job tracker
+        addJob(res.job_id, {
+          filename: file?.name || 'URL Upload',
+          thumbnail: file ? URL.createObjectURL(file) : url
+        })
+
+        // Immediate success feedback
+        setProgress(100)
+        setLoading(false)
+
+        // Redirect to home (or library) where they can see the progress indicator
+        router.push('/')
+        return
+      }
+
+      // Legacy Sync Upload (Fallback)
       if (file) {
         const form = new FormData()
         form.set('file', file, file.name)

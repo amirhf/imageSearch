@@ -19,3 +19,8 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
+
+class CaptionRequest(BaseModel):
+    image_bytes: bytes
+    text_hint: Optional[str] = None
+    client_confidence: Optional[float] = None

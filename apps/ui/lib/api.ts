@@ -68,3 +68,52 @@ export async function uploadImage(
 
   return res.json()
 }
+
+export async function uploadImageAsync(
+  input: { url?: string; file?: File; visibility?: string; edgeCaption?: { text: string; score: number } },
+  token?: string,
+  priority: 'low' | 'normal' | 'high' = 'normal'
+): Promise<{ job_id: string; status: string; poll_url: string }> {
+  const form = new FormData()
+  if (input.url) form.set('url', input.url)
+  if (input.file) form.set('file', input.file, input.file.name)
+  if (input.visibility) form.set('visibility', input.visibility)
+
+  const headers: HeadersInit = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  // Add Edge Caption headers if available
+  if (input.edgeCaption) {
+    headers['x-client-caption'] = input.edgeCaption.text.replace(/[\r\n]+/g, ' ').trim()
+    headers['x-client-confidence'] = input.edgeCaption.score.toString()
+  }
+
+  const uploadUrl = `${API_BASE}/images/async?priority=${priority}`
+  console.log('[DEBUG] Async uploading to:', uploadUrl)
+
+  const res = await fetch(uploadUrl, {
+    method: 'POST',
+    body: form,
+    headers
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Async upload failed: ${res.status} ${err}`)
+  }
+
+  return res.json()
+}
+
+export async function getJobStatus(jobId: string, token?: string): Promise<{ status: string; result?: any; error?: string }> {
+  const headers: HeadersInit = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch(`${API_BASE}/jobs/${jobId}`, { headers, cache: 'no-store' })
+  if (!res.ok) throw new Error(`Job poll failed: ${res.status}`)
+  return res.json()
+}

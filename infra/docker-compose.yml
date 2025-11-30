@@ -75,6 +75,21 @@ services:
       postgres:
         condition: service_healthy
 
+  ingestion-worker:
+    build:
+      context: ..
+      dockerfile: workers/Dockerfile
+    command: python -m workers.ingestion.worker
+    env_file:
+      - ../.env.docker
+    environment:
+      - WORKER_CONCURRENCY=4
+    volumes:
+      - ../storage/images:/app/storage/images
+    depends_on:
+      - redis
+      - postgres
+
 volumes:
   minio_data:
   redis_data:
