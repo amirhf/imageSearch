@@ -277,7 +277,10 @@ class PgVectorStore:
             
             # Optional visibility filter
             if visibility_filter:
-                query = query.filter(ImageDoc.visibility == visibility_filter)
+                if visibility_filter == "public":
+                    query = query.filter(ImageDoc.visibility.in_(["public", "public_admin"]))
+                else:
+                    query = query.filter(ImageDoc.visibility == visibility_filter)
             
             # Order by most recent first
             query = query.order_by(ImageDoc.created_at.desc())
