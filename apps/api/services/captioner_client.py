@@ -58,7 +58,13 @@ class CaptionerClient:
     
     async def caption(self, img_bytes: bytes) -> Tuple[str, float, int]:
         start = time.time()
+        start = time.time()
+        import os
+        use_real = os.getenv("USE_REAL_CAPTIONER", "true").lower() == "true"
+        
         try:
+            if not use_real:
+                raise RuntimeError("Local captioner disabled by config")
             _load_blip()
             image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             inputs = _processor(images=image, return_tensors="pt")
