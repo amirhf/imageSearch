@@ -5,9 +5,11 @@ Provides JWT validation and role-based access control.
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
-from typing import Optional
+from typing import Any, Dict, Optional
 import os
 import logging
+import time
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
@@ -17,8 +19,20 @@ from apps.api.storage.models import Profile
 
 logger = logging.getLogger(__name__)
 
+# Supabase's asymmetric JWT signing keys are advertised through JWKS and cached
+# by Supabase for 10 minutes. Match that cache window locally, and refresh once
+# on a missing kid to handle newly rotated keys.
+JWKS_CACHE_TTL_SECONDS = 10 * 60
+ASYMMETRIC_JWT_ALGORITHMS = {"ES256", "RS256"}
+
 # Database session for profile management
 _profile_session = None
+_jwks_cache: Optional[Dict[str, Any]] = None
+_jwks_cache_expires_at = 0.0
+
+
+class AuthConfigurationError(Exception):
+    """Raised when required authentication configuration is missing."""
 
 def get_profile_session():
     """Get or create database session for profile management"""
@@ -33,6 +47,95 @@ def get_profile_session():
 
 # HTTP Bearer token security scheme (extracts "Bearer <token>" from Authorization header)
 security = HTTPBearer(auto_error=False)
+
+
+def _supabase_jwks_url() -> str:
+    """Return this project's Supabase JWKS discovery URL."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    if not supabase_url:
+        raise AuthConfigurationError("SUPABASE_URL not configured")
+    return f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+
+async def _get_supabase_jwks(force_refresh: bool = False) -> Dict[str, Any]:
+    """Fetch and cache Supabase asymmetric JWT public keys."""
+    global _jwks_cache, _jwks_cache_expires_at
+
+    now = time.time()
+    if not force_refresh and _jwks_cache and now < _jwks_cache_expires_at:
+        return _jwks_cache
+
+    jwks_url = _supabase_jwks_url()
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(jwks_url)
+        response.raise_for_status()
+
+    jwks = response.json()
+    if not isinstance(jwks.get("keys"), list):
+        raise AuthConfigurationError("Supabase JWKS response did not include keys")
+
+    _jwks_cache = jwks
+    _jwks_cache_expires_at = now + JWKS_CACHE_TTL_SECONDS
+    return jwks
+
+
+def _find_jwk(jwks: Dict[str, Any], kid: str, alg: str) -> Optional[Dict[str, Any]]:
+    """Find the matching public JWK for the token header."""
+    for key in jwks.get("keys", []):
+        if key.get("kid") != kid:
+            continue
+        key_alg = key.get("alg")
+        if key_alg and key_alg != alg:
+            raise JWTError("JWT signing key algorithm mismatch")
+        return key
+    return None
+
+
+async def _decode_supabase_jwt(token: str) -> Dict[str, Any]:
+    """
+    Decode a Supabase Auth JWT.
+
+    Legacy/shared-secret projects issue HS256 tokens verified by
+    SUPABASE_JWT_SECRET. Projects migrated to Supabase JWT signing keys issue
+    asymmetric ES256/RS256 tokens verified through the project's JWKS endpoint.
+    """
+    header = jwt.get_unverified_header(token)
+    alg = header.get("alg")
+
+    if alg == "HS256":
+        jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
+        if not jwt_secret:
+            raise AuthConfigurationError("SUPABASE_JWT_SECRET not configured")
+        return jwt.decode(
+            token,
+            jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            options={"verify_aud": True, "verify_exp": True}
+        )
+
+    if alg in ASYMMETRIC_JWT_ALGORITHMS:
+        kid = header.get("kid")
+        if not kid:
+            raise JWTError("Asymmetric JWT missing kid header")
+
+        jwks = await _get_supabase_jwks()
+        key = _find_jwk(jwks, kid, alg)
+        if key is None:
+            jwks = await _get_supabase_jwks(force_refresh=True)
+            key = _find_jwk(jwks, kid, alg)
+        if key is None:
+            raise JWTError("No matching Supabase JWT signing key found")
+
+        return jwt.decode(
+            token,
+            key,
+            algorithms=[alg],
+            audience="authenticated",
+            options={"verify_aud": True, "verify_exp": True}
+        )
+
+    raise JWTError(f"Unsupported JWT algorithm: {alg or 'missing'}")
 
 
 def ensure_profile_exists(user_id: str, email: str, role: str) -> None:
@@ -141,25 +244,11 @@ async def get_current_user(
             role="admin"
         )
     
-    jwt_secret = os.getenv("SUPABASE_JWT_SECRET")
-    
-    if not jwt_secret:
-        logger.error("SUPABASE_JWT_SECRET not configured")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication not configured"
-        )
-    
     try:
-        # Decode and validate JWT
-        # Supabase uses HS256 algorithm and "authenticated" audience
-        payload = jwt.decode(
-            token,
-            jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-            options={"verify_aud": True, "verify_exp": True}
-        )
+        # Decode and validate JWT. Supabase Auth may issue either legacy HS256
+        # tokens or asymmetric ES256/RS256 tokens from the JWT signing keys
+        # system, depending on project configuration.
+        payload = await _decode_supabase_jwt(token)
         
         # Parse token payload
         token_data = TokenPayload(**payload)
@@ -192,6 +281,18 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid authentication token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    except AuthConfigurationError as e:
+        logger.error(f"Authentication configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication not configured"
+        )
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to fetch Supabase JWKS: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication provider unavailable"
         )
     except Exception as e:
         logger.error(f"Unexpected error in get_current_user: {str(e)}")

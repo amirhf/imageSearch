@@ -119,9 +119,8 @@ QDRANT_URL=http://localhost:6333
 
 # Supabase Authentication
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_JWT_SECRET=your-jwt-secret-from-supabase-settings
-SUPABASE_SERVICE_KEY=your-service-role-key
-SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_JWT_SECRET=your-jwt-secret-for-hs256-projects
+SUPABASE_SECRET_KEY=sb_secret_your-secret-key
 ADMIN_USER_ID=your-admin-user-uuid
 
 # Cloud providers
@@ -141,6 +140,10 @@ IMAGE_STORAGE_BACKEND=local
 IMAGE_STORAGE_PATH=./storage/images
 BASE_URL=http://localhost:8000
 ```
+
+The API verifies user access tokens with Supabase Auth. Legacy/shared-secret
+`HS256` tokens use `SUPABASE_JWT_SECRET`; asymmetric `ES256`/`RS256` tokens are
+verified from the project JWKS endpoint under `SUPABASE_URL`.
 
 ### Docker Deployment (.env.docker)
 For running the API in Docker, create `.env.docker` with **Docker network hostnames**:
@@ -172,9 +175,8 @@ CLOUD_DAILY_BUDGET_USD=10.00
 # Supabase Configuration (Multi-tenant Authentication)
 # Get these from: https://supabase.com/dashboard/project/YOUR_PROJECT/settings/api
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_JWT_SECRET=your-jwt-secret-from-api-settings
-SUPABASE_SERVICE_KEY=eyJhbGc...your-service-role-key
-SUPABASE_ANON_KEY=eyJhbGc...your-anon-key
+SUPABASE_JWT_SECRET=your-jwt-secret-for-hs256-projects
+SUPABASE_SECRET_KEY=sb_secret_your-secret-key
 ADMIN_USER_ID=your-admin-user-uuid
 
 # Image Storage (Docker)
@@ -204,8 +206,8 @@ S3_PRESIGNED_URL_EXPIRY=3600
 1. Go to [supabase.com](https://supabase.com) and create a new project
 2. Get your credentials from Settings → API:
    - Project URL
-   - Anon/Public key
-   - Service role key (keep secret!)
+   - Publishable key (`sb_publishable_...`) for client-side UI
+   - Secret key (`sb_secret_...`) for backend/admin operations only; never expose this in browser code
    - JWT Secret (Settings → API → JWT Settings)
 
 ### 2. Run Database Migrations
@@ -327,7 +329,7 @@ cp .env.local.example .env.local
 # Edit .env.local with your values:
 # NEXT_PUBLIC_API_BASE=http://localhost:8000
 # NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-# NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+# NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 npm install
 npm run dev   # http://localhost:3100
 ```
@@ -340,7 +342,7 @@ npm run start   # http://localhost:3100
 ### Important environment
 - `NEXT_PUBLIC_API_BASE` – Backend API URL (e.g., `http://localhost:8000`)
 - `NEXT_PUBLIC_SUPABASE_URL` – Your Supabase project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` – Supabase anonymous/public key
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` – Supabase publishable key (`sb_publishable_...`), safe for client-side use
 
 ### UI routes
 - `/` – Search page (query by text, shows local/cloud origin badges)

@@ -90,8 +90,7 @@ gcloud run deploy $PYTHON_SERVICE \
   --update-env-vars OPENCLIP_PRETRAINED="$OPENCLIP_PRETRAINED" \
   --update-env-vars SUPABASE_URL="$SUPABASE_URL" \
   --update-env-vars SUPABASE_JWT_SECRET="$SUPABASE_JWT_SECRET" \
-  --update-env-vars SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" \
-  --update-env-vars SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
+  --update-env-vars SUPABASE_SECRET_KEY="$SUPABASE_SECRET_KEY" \
   --update-env-vars ADMIN_USER_ID="$ADMIN_USER_ID" \
   --update-env-vars REDIS_URL="$REDIS_URL" \
   --update-env-vars REDIS_PASSWORD="$REDIS_PASSWORD"
