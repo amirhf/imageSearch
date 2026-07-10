@@ -25,6 +25,7 @@ export default function RootLayout() {
           name="(auth)/sign-up"
           options={{ presentation: 'modal', title: 'Create account' }}
         />
+        <Stack.Screen name="image/[id]" options={{ title: 'Image detail' }} />
       </Stack>
     </AppProviders>
   );

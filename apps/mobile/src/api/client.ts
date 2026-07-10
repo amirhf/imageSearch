@@ -47,7 +47,11 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   });
 
   const contentType = response.headers.get('content-type') ?? '';
-  const body = contentType.includes('application/json') ? await response.json() : await response.text();
+  const rawBody = await response.text();
+  const body =
+    contentType.includes('application/json') && rawBody.length > 0
+      ? JSON.parse(rawBody)
+      : rawBody;
 
   if (!response.ok) {
     throw new ApiError({
@@ -71,4 +75,26 @@ export function fetchHealth({ baseUrl }: { baseUrl?: string } = {}) {
     baseUrl,
     method: 'GET',
   });
+}
+
+export function resolveMediaUrl(url: string | undefined, baseUrl: string) {
+  if (!url) {
+    return undefined;
+  }
+
+  try {
+    const apiOrigin = new URL(normalizeBaseUrl(baseUrl)).origin;
+    const mediaUrl = new URL(url, apiOrigin);
+
+    if (
+      (mediaUrl.hostname === 'localhost' || mediaUrl.hostname === '127.0.0.1') &&
+      apiOrigin !== mediaUrl.origin
+    ) {
+      return `${apiOrigin}${mediaUrl.pathname}${mediaUrl.search}`;
+    }
+
+    return mediaUrl.toString();
+  } catch {
+    return url;
+  }
 }
