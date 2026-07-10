@@ -1,13 +1,47 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { AuthRequired } from '@/components/AuthRequired';
-import { Screen } from '@/components/Screen';
-import { StatusBadge } from '@/components/StatusBadge';
+import type { UploadAsset } from '@/api/uploads';
 import { useSession } from '@/auth/useSession';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { AuthRequired } from '@/components/AuthRequired';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { JobStatusCard } from '@/components/JobStatusCard';
+import { Screen } from '@/components/Screen';
+import { type LocalJobRecord } from '@/features/jobs/jobStore';
+import { useJobPolling } from '@/features/jobs/useJobPolling';
+import { useRecentJobs } from '@/features/jobs/useRecentJobs';
+import { useUploadImage } from '@/features/upload/useUploadImage';
+import { useNetworkState } from '@/hooks/useNetworkState';
+import { colors, spacing, typography } from '@/theme/tokens';
+
+function PollingJobCard({
+  job,
+  onRetry,
+}: {
+  job: LocalJobRecord;
+  onRetry(job: LocalJobRecord): void;
+}) {
+  useJobPolling(job);
+  return <JobStatusCard job={job} onRetry={onRetry} />;
+}
+
+function assetFromJob(job: LocalJobRecord): UploadAsset | null {
+  if (!job.assetUri) {
+    return null;
+  }
+
+  return {
+    fileName: job.fileName,
+    mimeType: job.mimeType,
+    uri: job.assetUri,
+  };
+}
 
 export default function JobsScreen() {
   const { user } = useSession();
+  const { jobs, isLoading } = useRecentJobs();
+  const { isOffline } = useNetworkState();
+  const uploadMutation = useUploadImage();
 
   if (!user) {
     return (
@@ -17,47 +51,66 @@ export default function JobsScreen() {
     );
   }
 
+  function retryUpload(job: LocalJobRecord) {
+    const asset = assetFromJob(job);
+    if (!asset || isOffline) {
+      return;
+    }
+
+    uploadMutation.mutate({
+      asset,
+      localId: job.localId,
+      visibility: job.visibility,
+    });
+  }
+
   return (
-    <Screen title="Jobs" subtitle="Async ingestion polling and local job history arrive in Phase 4.">
-      <View style={styles.panel}>
-        <Text style={styles.title}>No recent jobs yet</Text>
-        <Text style={styles.copy}>
-          This screen will persist queued uploads, poll /jobs/:id, and surface completed image
-          details.
-        </Text>
-        <View style={styles.badges}>
-          <StatusBadge label="queued" />
-          <StatusBadge label="processing" tone="accent" />
-          <StatusBadge label="completed" tone="success" />
-          <StatusBadge label="failed" tone="danger" />
+    <Screen title="Jobs" subtitle="Recent async ingestion jobs, persisted locally on this device.">
+      {isOffline ? (
+        <ErrorState
+          title="Offline"
+          message="Job polling is paused until the device is back online."
+        />
+      ) : null}
+
+      {isLoading ? (
+        <View style={styles.loadingPanel}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.loadingText}>Loading recent jobs...</Text>
         </View>
-      </View>
+      ) : null}
+
+      {!isLoading && jobs.length === 0 ? (
+        <EmptyState
+          icon="cloud-upload-outline"
+          title="No upload jobs yet"
+          copy="Upload an image to start an async ingestion job and watch its captioning progress."
+        />
+      ) : null}
+
+      {jobs.length > 0 ? (
+        <View style={styles.jobs}>
+          {jobs.map((job) => (
+            <PollingJobCard job={job} key={job.localId} onRetry={retryUpload} />
+          ))}
+        </View>
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
+  loadingPanel: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
   },
-  title: {
-    color: colors.text,
-    fontSize: typography.subtitle,
-    fontWeight: '800',
-  },
-  copy: {
+  loadingText: {
     color: colors.muted,
     fontSize: typography.body,
-    lineHeight: 22,
+    fontWeight: '700',
   },
-  badges: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
+  jobs: {
+    gap: spacing.md,
   },
 });

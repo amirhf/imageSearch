@@ -7,9 +7,12 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey =
   process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabasePublishableKey);
+const hasSupabaseEnv = Boolean(supabaseUrl && supabasePublishableKey);
+const isServerRender = typeof window === 'undefined';
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
+export const isSupabaseConfigured = hasSupabaseEnv;
+
+export const supabase: SupabaseClient | null = hasSupabaseEnv && !isServerRender
   ? createClient(supabaseUrl as string, supabasePublishableKey as string, {
       auth: {
         autoRefreshToken: true,

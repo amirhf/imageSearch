@@ -8,7 +8,11 @@
     "scheme": "imagesearch",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture photos to upload into Image Search.",
+        "NSPhotoLibraryUsageDescription": "Choose photos to upload into Image Search."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +29,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Capture photos to upload into Image Search.",
+          "photosPermission": "Choose photos to upload into Image Search."
+        }
+      ],
       [
         "expo-splash-screen",
         {

@@ -26,6 +26,7 @@ export default function RootLayout() {
           options={{ presentation: 'modal', title: 'Create account' }}
         />
         <Stack.Screen name="image/[id]" options={{ title: 'Image detail' }} />
+        <Stack.Screen name="job/[id]" options={{ title: 'Job detail' }} />
       </Stack>
     </AppProviders>
   );

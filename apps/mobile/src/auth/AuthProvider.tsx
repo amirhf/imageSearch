@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { createContext, PropsWithChildren, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { isSupabaseConfigured, supabase } from '@/auth/supabase';
+import { clearRecentJobs } from '@/features/jobs/jobStore';
 
 interface AuthContextValue {
   session: Session | null;
@@ -27,6 +28,7 @@ export function AuthProvider({ children, queryClient }: AuthProviderProps) {
 
   const clearPrivateClientState = useCallback(() => {
     queryClient.clear();
+    void clearRecentJobs();
   }, [queryClient]);
 
   useEffect(() => {

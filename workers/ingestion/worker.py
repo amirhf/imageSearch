@@ -129,6 +129,8 @@ class IngestionWorker(BaseWorker):
                 "status": "completed",
                 "image_id": image_hash,
                 "caption": caption,
+                "user_id": job.get("user_id"),
+                "visibility": job.get("visibility", "private"),
                 "completed_at": time.time()
             }
             
@@ -144,7 +146,12 @@ class IngestionWorker(BaseWorker):
             await self.redis.setex(
                 f"{self.RESULT_PREFIX}{job_id}",
                 3600,
-                json.dumps({"status": "failed", "error": str(e)})
+                json.dumps({
+                    "status": "failed",
+                    "error": str(e),
+                    "user_id": job.get("user_id"),
+                    "visibility": job.get("visibility", "private")
+                })
             )
 
 if __name__ == "__main__":

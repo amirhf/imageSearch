@@ -28,7 +28,34 @@ export type SearchScope = 'public' | 'mine' | 'all';
 
 export type ImageVisibility = 'private' | 'public' | 'public_admin';
 
+export type UploadVisibility = 'private' | 'public';
+
 export type CaptionOrigin = 'edge' | 'cache' | 'local' | 'cloud' | string;
+
+export type JobStatus = 'uploading' | 'queued' | 'processing' | 'completed' | 'failed' | 'retry_pending';
+
+export interface UploadJobResponse {
+  job_id: string;
+  status: 'queued';
+  poll_url: string;
+}
+
+export interface JobStatusResult {
+  image_id?: string;
+  caption?: string;
+  error?: string;
+  visibility?: ImageVisibility;
+  download_url?: string;
+  thumbnail_url?: string;
+}
+
+export interface JobStatusResponse {
+  job_id: string;
+  status: Extract<JobStatus, 'queued' | 'processing' | 'completed' | 'failed'>;
+  result?: JobStatusResult;
+  submitted_at?: number;
+  visibility?: ImageVisibility;
+}
 
 export interface SearchResult {
   id: string;
