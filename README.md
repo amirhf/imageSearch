@@ -56,6 +56,19 @@ npm run dev
 
 See the [Frontend section](#frontend-nextjs-ui) below for detailed setup and features.
 
+### Run Mobile Companion (React Native / Expo)
+The project also includes a mobile companion app in `apps/mobile/`:
+
+```bash
+cd apps/mobile
+cp .env.example .env
+# Edit .env with the API URL and Supabase publishable config
+npm install
+npx expo start
+```
+
+See the [React Native Companion App](#react-native-companion-app) section and [mobile reviewer guide](apps/mobile/docs/reviewer-guide.md) for screenshots, architecture, demo script, and manual QA.
+
 ## Storage Options
 - **Local** - Files stored on disk (default, zero setup)
 - **MinIO** - S3-compatible, runs in Docker (dev/self-hosted)
@@ -375,6 +388,46 @@ All proxy routes automatically forward the `Authorization` header from Supabase:
   export default nextConfig
   ```
 - Tailwind warning about `@tailwindcss/line-clamp`: remove the plugin from `tailwind.config.ts` (included by default in v3.3+).
+
+## React Native Companion App
+Path: `apps/mobile/`
+
+The Expo app is a mobile-first client for the same FastAPI backend used by the web UI. It demonstrates native mobile product concerns around image capture, auth, offline state, async job tracking, and private/public image management while leaving AI routing and retrieval on the backend.
+
+Core mobile flows:
+
+- Supabase sign-in and sign-up.
+- Public, mine, and all search scopes.
+- Camera/photo-library image upload through `POST /images/async?priority=normal`.
+- Private/public visibility selection.
+- Async ingestion job list and job detail polling.
+- Retry-pending local jobs for failed/offline uploads.
+- Owner library filters, visibility updates, soft delete, and image detail.
+- Offline banner, paused polling, stale cached search messaging, and local cache/queue cleanup.
+
+Run it locally:
+
+```bash
+cd apps/mobile
+cp .env.example .env
+npm install
+npx expo start
+```
+
+Mobile-safe env values:
+
+```bash
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8000
+EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-or-anon-key
+```
+
+Use a LAN API URL for physical devices. Use `http://10.0.2.2:8000` for Android Emulator.
+
+Reviewer resources:
+
+- [Mobile README](apps/mobile/README.md)
+- [Reviewer guide, screenshots, architecture diagram, demo script, and QA checklist](apps/mobile/docs/reviewer-guide.md)
 
 ## Production Deployment (Hybrid Architecture)
 

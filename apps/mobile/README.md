@@ -4,6 +4,13 @@ Expo + React Native companion app for the AI Image Search platform.
 
 This app is a thin mobile client for the existing FastAPI backend. It currently includes the app shell, Expo Router tabs, persistent Supabase auth, TanStack Query, API base URL settings, backend health and auth checks, public/authenticated search scopes, native image upload, async job polling, offline-aware retry handling, library browsing, image mutations, and image detail.
 
+Reviewer shortcut: [Mobile Companion Reviewer Guide](./docs/reviewer-guide.md).
+
+<p>
+  <img src="./docs/assets/search-empty.png" width="220" alt="Mobile search screen" />
+  <img src="./docs/assets/upload-empty.png" width="220" alt="Mobile upload screen" />
+</p>
+
 ## Requirements
 
 - Node LTS through nvm. This repo has been verified with `v24.11.1`.
@@ -34,6 +41,8 @@ EXPO_PUBLIC_API_BASE_URL=http://192.168.1.25:8000
 
 You can also override the API base URL from the Settings tab.
 
+For Android Emulator, use `http://10.0.2.2:8000` as the backend base URL.
+
 ## Run
 
 ```bash
@@ -45,6 +54,16 @@ npx expo start
 
 Scan the QR code with Expo Go.
 
+For iOS Simulator smoke testing:
+
+```bash
+source ~/.nvm/nvm.sh
+nvm use 24.11.1
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0) \
+npx expo start --ios --host lan
+```
+
 ## Scripts
 
 ```bash
@@ -52,6 +71,20 @@ npm run typecheck
 npm run lint
 npm run web
 ```
+
+## Reviewer Flow
+
+1. Start the FastAPI backend and confirm `GET /health`.
+2. Start this Expo app.
+3. Search public images anonymously.
+4. Sign in with Supabase.
+5. Upload from photo library or camera with private/public visibility.
+6. Track the async job to completion.
+7. Open the completed image detail screen.
+8. Search `mine` for generated caption terms.
+9. Toggle offline mode to verify retry-pending and stale-cache states.
+
+See [docs/reviewer-guide.md](./docs/reviewer-guide.md) for the architecture diagram, demo script, and manual QA checklist.
 
 ## Current Scope
 
@@ -82,4 +115,4 @@ npm run web
 - Cached search results marked as stale while offline.
 - Settings actions to clear the local job queue and query cache.
 
-Next phase adds portfolio finishing touches.
+This phase is portfolio-ready for reviewer setup and manual QA.
