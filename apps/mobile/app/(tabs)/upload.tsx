@@ -3,7 +3,7 @@ import { type Href, router } from 'expo-router';
 import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
-import type { UploadAsset } from '@/api/uploads';
+import { getUploadFileName, getUploadMimeType, type UploadAsset } from '@/api/uploads';
 import type { UploadVisibility } from '@/api/types';
 import { useSession } from '@/auth/useSession';
 import { ActionButton } from '@/components/ActionButton';
@@ -12,7 +12,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Screen } from '@/components/Screen';
 import { StatusBadge } from '@/components/StatusBadge';
 import { VisibilitySelector } from '@/components/VisibilitySelector';
-import { createLocalJobId } from '@/features/jobs/jobStore';
+import { createLocalJobId, upsertRecentJob } from '@/features/jobs/jobStore';
 import { useUploadImage } from '@/features/upload/useUploadImage';
 import { useNetworkState } from '@/hooks/useNetworkState';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
@@ -89,11 +89,29 @@ export default function UploadScreen() {
   }
 
   async function submitUpload() {
-    if (!selectedAsset || isOffline) {
+    if (!selectedAsset) {
       return;
     }
 
     const localId = createLocalJobId();
+
+    if (isOffline) {
+      const now = new Date().toISOString();
+      await upsertRecentJob({
+        assetUri: selectedAsset.uri,
+        createdAt: now,
+        error: 'Offline. Reconnect and tap Retry from Jobs.',
+        fileName: getUploadFileName(selectedAsset),
+        localId,
+        mimeType: getUploadMimeType(selectedAsset),
+        status: 'retry_pending',
+        updatedAt: now,
+        visibility,
+      });
+      setSelectedAsset(null);
+      router.push(`/job/${encodeURIComponent(localId)}` as Href);
+      return;
+    }
 
     try {
       const response = await uploadMutation.mutateAsync({
@@ -113,7 +131,7 @@ export default function UploadScreen() {
       {isOffline ? (
         <ErrorState
           title="Offline"
-          message="Uploads pause while the device is offline. Reconnect and try again."
+          message="Save the selected image as retry-pending, then retry from Jobs when online."
         />
       ) : null}
 
@@ -146,8 +164,14 @@ export default function UploadScreen() {
       </View>
 
       <ActionButton
-        disabled={!selectedAsset || isOffline || uploadMutation.isPending}
-        label={uploadMutation.isPending ? 'Queueing...' : 'Upload for ingestion'}
+        disabled={!selectedAsset || uploadMutation.isPending}
+        label={
+          uploadMutation.isPending
+            ? 'Queueing...'
+            : isOffline
+              ? 'Save for retry'
+              : 'Upload for ingestion'
+        }
         onPress={submitUpload}
       />
     </Screen>

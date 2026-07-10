@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -11,16 +11,27 @@ import { Screen } from '@/components/Screen';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useSession } from '@/auth/useSession';
 import { useBackendAuth } from '@/features/auth/useBackendAuth';
+import { clearRecentJobs } from '@/features/jobs/jobStore';
+import { useRecentJobs } from '@/features/jobs/useRecentJobs';
 import { useApiBaseUrl } from '@/hooks/useApiBaseUrl';
+import { useNetworkState } from '@/hooks/useNetworkState';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export default function SettingsScreen() {
+  const queryClient = useQueryClient();
   const { user, signOut, isConfigured, isLoading: isAuthLoading } = useSession();
   const { apiBaseUrl, defaultApiBaseUrl, isLoading, setApiBaseUrl, resetApiBaseUrl } =
     useApiBaseUrl();
+  const network = useNetworkState();
+  const { jobs } = useRecentJobs();
   const [draftBaseUrl, setDraftBaseUrl] = useState<string | null>(null);
+  const [isClearingJobs, setIsClearingJobs] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const visibleBaseUrl = draftBaseUrl ?? apiBaseUrl;
+  const activeJobCount = jobs.filter(
+    (job) => job.status === 'uploading' || job.status === 'queued' || job.status === 'processing',
+  ).length;
+  const retryPendingCount = jobs.filter((job) => job.status === 'retry_pending').length;
 
   const healthQuery = useQuery({
     queryKey: ['health', apiBaseUrl],
@@ -66,6 +77,19 @@ export default function SettingsScreen() {
     } finally {
       setIsSigningOut(false);
     }
+  }
+
+  async function handleClearRecentJobs() {
+    setIsClearingJobs(true);
+    try {
+      await clearRecentJobs();
+    } finally {
+      setIsClearingJobs(false);
+    }
+  }
+
+  function handleClearQueryCache() {
+    queryClient.clear();
   }
 
   return (
@@ -173,6 +197,48 @@ export default function SettingsScreen() {
             </View>
           </>
         )}
+      </View>
+
+      <View style={styles.panel}>
+        <View style={styles.panelHeader}>
+          <Text style={styles.panelTitle}>Network</Text>
+          <StatusBadge
+            label={network.label}
+            tone={network.isOffline ? 'danger' : network.label === 'checking' ? 'muted' : 'success'}
+          />
+        </View>
+        <InfoRow label="Connection" value={network.isOffline ? 'offline' : 'online'} />
+        <InfoRow label="Transport" value={network.type} />
+        <InfoRow
+          label="Internet"
+          value={
+            network.isInternetReachable === null
+              ? 'checking'
+              : network.isInternetReachable
+                ? 'reachable'
+                : 'unreachable'
+          }
+        />
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Local data</Text>
+        <InfoRow label="Recent jobs" value={String(jobs.length)} />
+        <InfoRow label="Retry pending" value={String(retryPendingCount)} />
+        <InfoRow label="Active jobs" value={String(activeJobCount)} />
+        <View style={styles.actions}>
+          <ActionButton
+            label={isClearingJobs ? 'Clearing...' : 'Clear job queue'}
+            onPress={handleClearRecentJobs}
+            disabled={isClearingJobs}
+            variant="danger"
+          />
+          <ActionButton
+            label="Clear query cache"
+            onPress={handleClearQueryCache}
+            variant="secondary"
+          />
+        </View>
       </View>
 
       <View style={styles.panel}>

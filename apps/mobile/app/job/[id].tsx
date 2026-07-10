@@ -106,7 +106,11 @@ export default function JobDetailScreen() {
 
       {job ? (
         <>
-          <JobStatusCard job={job} onRetry={retryUpload} />
+          <JobStatusCard
+            job={job}
+            onRetry={retryUpload}
+            retryDisabled={isOffline || uploadMutation.isPending}
+          />
 
           {jobQuery.isError ? (
             <ErrorState

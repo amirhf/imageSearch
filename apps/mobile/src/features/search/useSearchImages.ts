@@ -4,6 +4,7 @@ import { searchImages } from '@/api/search';
 import type { SearchScope } from '@/api/types';
 import { useSession } from '@/auth/useSession';
 import { useApiBaseUrl } from '@/hooks/useApiBaseUrl';
+import { useNetworkState } from '@/hooks/useNetworkState';
 
 interface UseSearchImagesInput {
   query: string;
@@ -14,6 +15,7 @@ interface UseSearchImagesInput {
 export function useSearchImages({ query, scope, k = 12 }: UseSearchImagesInput) {
   const { accessToken, user } = useSession();
   const { apiBaseUrl, isLoading: isBaseUrlLoading } = useApiBaseUrl();
+  const { isOffline } = useNetworkState();
   const trimmedQuery = query.trim();
 
   return useQuery({
@@ -26,7 +28,7 @@ export function useSearchImages({ query, scope, k = 12 }: UseSearchImagesInput) 
         token: accessToken,
         baseUrl: apiBaseUrl,
       }),
-    enabled: !isBaseUrlLoading && trimmedQuery.length > 0,
+    enabled: !isBaseUrlLoading && trimmedQuery.length > 0 && !isOffline,
     staleTime: 20_000,
   });
 }

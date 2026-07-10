@@ -17,12 +17,14 @@ import { colors, spacing, typography } from '@/theme/tokens';
 function PollingJobCard({
   job,
   onRetry,
+  retryDisabled,
 }: {
   job: LocalJobRecord;
   onRetry(job: LocalJobRecord): void;
+  retryDisabled: boolean;
 }) {
   useJobPolling(job);
-  return <JobStatusCard job={job} onRetry={onRetry} />;
+  return <JobStatusCard job={job} onRetry={onRetry} retryDisabled={retryDisabled} />;
 }
 
 function assetFromJob(job: LocalJobRecord): UploadAsset | null {
@@ -91,7 +93,12 @@ export default function JobsScreen() {
       {jobs.length > 0 ? (
         <View style={styles.jobs}>
           {jobs.map((job) => (
-            <PollingJobCard job={job} key={job.localId} onRetry={retryUpload} />
+            <PollingJobCard
+              job={job}
+              key={job.localId}
+              onRetry={retryUpload}
+              retryDisabled={isOffline || uploadMutation.isPending}
+            />
           ))}
         </View>
       ) : null}

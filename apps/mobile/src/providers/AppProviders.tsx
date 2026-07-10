@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PropsWithChildren, useState } from 'react';
 
 import { AuthProvider } from '@/auth/AuthProvider';
+import { OfflineBanner } from '@/components/OfflineBanner';
+import { NetworkProvider } from '@/providers/NetworkProvider';
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(
@@ -18,7 +20,10 @@ export function AppProviders({ children }: PropsWithChildren) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider queryClient={queryClient}>{children}</AuthProvider>
+      <NetworkProvider>
+        <OfflineBanner />
+        <AuthProvider queryClient={queryClient}>{children}</AuthProvider>
+      </NetworkProvider>
     </QueryClientProvider>
   );
 }

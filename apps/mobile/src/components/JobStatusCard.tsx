@@ -14,6 +14,7 @@ import { formatDate } from '@/utils/format';
 interface JobStatusCardProps {
   job: LocalJobRecord;
   onRetry?: (job: LocalJobRecord) => void;
+  retryDisabled?: boolean;
   compact?: boolean;
 }
 
@@ -43,7 +44,12 @@ function isActive(status: JobStatus) {
   return status === 'uploading' || status === 'queued' || status === 'processing';
 }
 
-export function JobStatusCard({ job, onRetry, compact = false }: JobStatusCardProps) {
+export function JobStatusCard({
+  job,
+  onRetry,
+  retryDisabled = false,
+  compact = false,
+}: JobStatusCardProps) {
   const { apiBaseUrl } = useApiBaseUrl();
   const imageHref = job.imageId ? (`/image/${encodeURIComponent(job.imageId)}` as Href) : null;
   const jobHref = `/job/${encodeURIComponent(job.jobId ?? job.localId)}` as Href;
@@ -93,7 +99,7 @@ export function JobStatusCard({ job, onRetry, compact = false }: JobStatusCardPr
               />
             ) : null}
             {job.status === 'retry_pending' && onRetry ? (
-              <ActionButton label="Retry" onPress={() => onRetry(job)} />
+              <ActionButton label="Retry" onPress={() => onRetry(job)} disabled={retryDisabled} />
             ) : null}
           </View>
         ) : null}

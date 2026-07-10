@@ -1,12 +1,5 @@
-import { useNetInfo } from '@react-native-community/netinfo';
+import { useNetworkContext } from '@/providers/NetworkProvider';
 
 export function useNetworkState() {
-  const netInfo = useNetInfo();
-  const isOffline = netInfo.isConnected === false || netInfo.isInternetReachable === false;
-
-  return {
-    isOffline,
-    isConnected: !isOffline,
-    type: netInfo.type,
-  };
+  return useNetworkContext();
 }

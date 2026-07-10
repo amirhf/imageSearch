@@ -12,11 +12,13 @@ import type { SearchScope } from '@/api/types';
 import { useSession } from '@/auth/useSession';
 import { useSearchImages } from '@/features/search/useSearchImages';
 import { useApiBaseUrl } from '@/hooks/useApiBaseUrl';
+import { useNetworkState } from '@/hooks/useNetworkState';
 import { colors, spacing, typography } from '@/theme/tokens';
 
 export default function SearchScreen() {
   const { user } = useSession();
   const { apiBaseUrl } = useApiBaseUrl();
+  const { isOffline } = useNetworkState();
   const [draftQuery, setDraftQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [scope, setScope] = useState<SearchScope>('public');
@@ -29,6 +31,8 @@ export default function SearchScreen() {
 
   const results = searchQuery.data?.results ?? [];
   const hasSubmittedQuery = submittedQuery.length > 0;
+  const isShowingCachedResults = isOffline && Boolean(searchQuery.data) && hasSubmittedQuery;
+  const isOfflineWithoutCache = isOffline && hasSubmittedQuery && !searchQuery.data;
 
   return (
     <Screen
@@ -70,7 +74,18 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      {searchQuery.isError ? (
+      {isShowingCachedResults ? (
+        <Text style={styles.offlineText}>Offline: showing cached results until you reconnect.</Text>
+      ) : null}
+
+      {isOfflineWithoutCache ? (
+        <ErrorState
+          title="Offline"
+          message="Search needs a connection unless this query is already cached on this device."
+        />
+      ) : null}
+
+      {searchQuery.isError && !isOffline ? (
         <ErrorState
           title="Search failed"
           message={
@@ -131,6 +146,13 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.caption,
     fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  offlineText: {
+    color: colors.danger,
+    fontSize: typography.caption,
+    fontWeight: '800',
+    lineHeight: 18,
     textTransform: 'uppercase',
   },
 });
