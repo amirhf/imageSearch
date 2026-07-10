@@ -2,7 +2,7 @@
 
 Expo + React Native companion app for the AI Image Search platform.
 
-This app is a thin mobile client for the existing FastAPI backend. It currently includes the app shell, Expo Router tabs, persistent Supabase auth, TanStack Query, API base URL settings, backend health and auth checks, public/authenticated search scopes, native image upload, async job polling, and image detail.
+This app is a thin mobile client for the existing FastAPI backend. It currently includes the app shell, Expo Router tabs, persistent Supabase auth, TanStack Query, API base URL settings, backend health and auth checks, public/authenticated search scopes, native image upload, async job polling, library browsing, image mutations, and image detail.
 
 ## Requirements
 
@@ -72,5 +72,9 @@ npm run web
 - Authenticated multipart upload to `POST /images/async?priority=normal`.
 - Local recent job history with retry-pending upload records.
 - `GET /jobs/{job_id}` polling and `/job/[id]` detail screen.
+- Owner library view backed by `GET /images`, with all/private/public filters.
+- Pull-to-refresh for the mobile library.
+- Owner-only visibility updates through `PATCH /images/{id}`.
+- Owner-only soft delete through `DELETE /images/{id}`.
 
-Next phases add library browsing, mutations, and deeper offline retry polish.
+Next phases add deeper offline retry polish and portfolio finishing touches.

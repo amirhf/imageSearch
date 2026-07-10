@@ -1,14 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, View } from 'react-native';
 
 import { resolveMediaUrl } from '@/api/client';
+import type { ImageVisibility } from '@/api/types';
+import { useSession } from '@/auth/useSession';
+import { ActionButton } from '@/components/ActionButton';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { MetadataRow } from '@/components/MetadataRow';
 import { Screen } from '@/components/Screen';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useImage } from '@/features/images/useImage';
+import { useDeleteImage, useUpdateImage } from '@/features/images/useImageMutations';
 import { useApiBaseUrl } from '@/hooks/useApiBaseUrl';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 import { compactOrigin, formatBytes, formatDate, formatPercent } from '@/utils/format';
@@ -24,14 +28,50 @@ function normalizeParam(value: string | string[] | undefined) {
 export default function ImageDetailScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const imageId = normalizeParam(params.id);
+  const { user } = useSession();
   const { apiBaseUrl } = useApiBaseUrl();
   const imageQuery = useImage(imageId);
+  const updateImage = useUpdateImage();
+  const deleteImage = useDeleteImage();
   const image = imageQuery.data;
   const imageUrl = resolveMediaUrl(image?.download_url ?? image?.thumbnail_url, apiBaseUrl);
   const origin = compactOrigin(image?.caption_origin ?? image?.origin);
   const confidence = formatPercent(image?.caption_confidence ?? image?.confidence);
   const dimensions =
     image?.width && image?.height ? `${image.width} x ${image.height}` : undefined;
+  const canManage = Boolean(user?.id && image?.owner_user_id === user.id);
+  const nextVisibility: ImageVisibility =
+    image?.visibility === 'private' ? 'public' : 'private';
+
+  function updateVisibility() {
+    if (!image) {
+      return;
+    }
+
+    updateImage.mutate({
+      id: image.id,
+      visibility: nextVisibility,
+    });
+  }
+
+  function confirmDelete() {
+    if (!image) {
+      return;
+    }
+
+    Alert.alert('Delete image?', 'This removes the image from your searchable library.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deleteImage.mutate(image.id, {
+            onSuccess: () => router.replace('/library'),
+          });
+        },
+      },
+    ]);
+  }
 
   return (
     <Screen title="Image" subtitle={image?.caption ?? 'Inspect caption, visibility, and routing metadata.'}>
@@ -94,6 +134,50 @@ export default function ImageDetailScreen() {
             <MetadataRow label="Size" value={formatBytes(image.size_bytes)} />
             <MetadataRow label="Created" value={formatDate(image.created_at)} />
           </View>
+
+          {canManage ? (
+            <View style={styles.panel}>
+              <Text style={styles.sectionTitle}>Owner actions</Text>
+              <Text style={styles.ownerCopy}>
+                Change whether this image appears in public search, or remove it from your
+                library.
+              </Text>
+              <View style={styles.actions}>
+                <ActionButton
+                  disabled={updateImage.isPending}
+                  label={
+                    updateImage.isPending
+                      ? 'Updating...'
+                      : nextVisibility === 'public'
+                        ? 'Make public'
+                        : 'Make private'
+                  }
+                  onPress={updateVisibility}
+                  variant="secondary"
+                />
+                <ActionButton
+                  disabled={deleteImage.isPending}
+                  label={deleteImage.isPending ? 'Deleting...' : 'Delete'}
+                  onPress={confirmDelete}
+                  variant="danger"
+                />
+              </View>
+              {updateImage.isError ? (
+                <Text style={styles.errorText}>
+                  {updateImage.error instanceof Error
+                    ? updateImage.error.message
+                    : 'Visibility update failed.'}
+                </Text>
+              ) : null}
+              {deleteImage.isError ? (
+                <Text style={styles.errorText}>
+                  {deleteImage.error instanceof Error
+                    ? deleteImage.error.message
+                    : 'Delete failed.'}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </>
       ) : null}
     </Screen>
@@ -151,5 +235,20 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: typography.subtitle,
     fontWeight: '900',
+  },
+  ownerCopy: {
+    color: colors.muted,
+    fontSize: typography.body,
+    lineHeight: 22,
+  },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: typography.caption,
+    lineHeight: 18,
   },
 });

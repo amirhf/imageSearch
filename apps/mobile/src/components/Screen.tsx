@@ -1,5 +1,5 @@
-import { PropsWithChildren, ReactNode } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PropsWithChildren, ReactElement, ReactNode } from 'react';
+import { RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, spacing, typography } from '@/theme/tokens';
@@ -8,15 +8,17 @@ interface ScreenProps extends PropsWithChildren {
   title: string;
   subtitle?: string;
   action?: ReactNode;
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
-export function Screen({ title, subtitle, action, children }: ScreenProps) {
+export function Screen({ title, subtitle, action, children, refreshControl }: ScreenProps) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         alwaysBounceVertical={false}
         contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled">
+        keyboardShouldPersistTaps="handled"
+        refreshControl={refreshControl}>
         <View style={styles.header}>
           <View style={styles.titleBlock}>
             <Text style={styles.title}>{title}</Text>

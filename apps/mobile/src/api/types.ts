@@ -59,7 +59,7 @@ export interface JobStatusResponse {
 
 export interface SearchResult {
   id: string;
-  score: number;
+  score?: number;
   vec_score?: number;
   text_score?: number;
   caption?: string;
@@ -80,6 +80,37 @@ export interface SearchResult {
 export interface SearchResponse {
   query: string;
   results: SearchResult[];
+}
+
+export interface ImageListItem {
+  id: string;
+  caption?: string;
+  caption_confidence?: number;
+  confidence?: number;
+  caption_origin?: CaptionOrigin;
+  origin?: CaptionOrigin;
+  visibility?: ImageVisibility;
+  download_url?: string;
+  thumbnail_url?: string;
+  width?: number;
+  height?: number;
+  format?: string;
+  size_bytes?: number;
+  created_at?: string;
+  owner_user_id?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ImageListResponse {
+  images: ImageListItem[];
+  limit: number;
+  offset: number;
+  count: number;
+}
+
+export interface DeleteImageResponse {
+  id: string;
+  message: string;
 }
 
 export interface ImageDetail {
