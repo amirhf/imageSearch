@@ -13,6 +13,17 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
+export interface BackendAuthUser {
+  id: string;
+  email: string;
+  role?: string;
+}
+
+export interface AuthMeResponse {
+  authenticated: boolean;
+  user: BackendAuthUser | null;
+}
+
 export type SearchScope = 'public' | 'mine' | 'all';
 
 export type ImageVisibility = 'private' | 'public' | 'public_admin';

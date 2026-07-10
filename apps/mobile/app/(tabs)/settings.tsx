@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -9,14 +10,16 @@ import { InfoRow } from '@/components/InfoRow';
 import { Screen } from '@/components/Screen';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useSession } from '@/auth/useSession';
+import { useBackendAuth } from '@/features/auth/useBackendAuth';
 import { useApiBaseUrl } from '@/hooks/useApiBaseUrl';
 import { colors, radii, spacing, typography } from '@/theme/tokens';
 
 export default function SettingsScreen() {
-  const { user, signOut, isConfigured } = useSession();
+  const { user, signOut, isConfigured, isLoading: isAuthLoading } = useSession();
   const { apiBaseUrl, defaultApiBaseUrl, isLoading, setApiBaseUrl, resetApiBaseUrl } =
     useApiBaseUrl();
   const [draftBaseUrl, setDraftBaseUrl] = useState<string | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const visibleBaseUrl = draftBaseUrl ?? apiBaseUrl;
 
   const healthQuery = useQuery({
@@ -25,6 +28,7 @@ export default function SettingsScreen() {
     enabled: !isLoading && apiBaseUrl.length > 0,
     retry: false,
   });
+  const backendAuthQuery = useBackendAuth();
 
   const healthTone = healthQuery.isSuccess ? 'success' : healthQuery.isError ? 'danger' : 'muted';
   const healthLabel = healthQuery.isSuccess
@@ -34,6 +38,35 @@ export default function SettingsScreen() {
       : healthQuery.isFetching
         ? 'checking'
         : 'not checked';
+  const backendAuthTone = backendAuthQuery.isSuccess
+    ? backendAuthQuery.data.authenticated
+      ? 'success'
+      : 'danger'
+    : backendAuthQuery.isError
+      ? 'danger'
+      : backendAuthQuery.isFetching
+        ? 'muted'
+        : 'muted';
+  const backendAuthLabel = backendAuthQuery.isSuccess
+    ? backendAuthQuery.data.authenticated
+      ? 'accepted'
+      : 'rejected'
+    : backendAuthQuery.isError
+      ? 'failed'
+      : backendAuthQuery.isFetching
+        ? 'checking'
+        : user
+          ? 'not checked'
+          : 'anonymous';
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   return (
     <Screen title="Settings" subtitle="Local configuration, account state, and backend diagnostics.">
@@ -88,13 +121,57 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Account</Text>
+        <View style={styles.panelHeader}>
+          <Text style={styles.panelTitle}>Account</Text>
+          <StatusBadge label={backendAuthLabel} tone={backendAuthTone} />
+        </View>
         <InfoRow label="Supabase config" value={isConfigured ? 'configured' : 'missing env'} />
-        <InfoRow label="Signed in as" value={user?.email ?? 'anonymous'} />
+        <InfoRow
+          label="Session"
+          value={user ? 'signed in' : isAuthLoading ? 'loading' : 'anonymous'}
+        />
+        {user?.email ? <InfoRow label="Email" value={user.email} /> : null}
+        {user?.id ? <InfoRow label="User ID" value={user.id} /> : null}
+        {backendAuthQuery.data?.user?.role ? (
+          <InfoRow label="Backend role" value={backendAuthQuery.data.user.role} />
+        ) : null}
         {user ? (
-          <ActionButton label="Log out" variant="secondary" onPress={signOut} />
+          <>
+            <View style={styles.actions}>
+              <ActionButton
+                label="Check auth"
+                onPress={() => backendAuthQuery.refetch()}
+                variant="secondary"
+              />
+              <ActionButton
+                disabled={isSigningOut}
+                label={isSigningOut ? 'Logging out...' : 'Log out'}
+                onPress={handleSignOut}
+                variant="secondary"
+              />
+            </View>
+            {backendAuthQuery.isError ? (
+              <Text style={styles.errorText}>
+                {backendAuthQuery.error instanceof Error
+                  ? backendAuthQuery.error.message
+                  : 'Backend auth check failed.'}
+              </Text>
+            ) : null}
+          </>
         ) : (
-          <Text style={styles.helpText}>Sign-in screens are wired for Phase 3 auth testing.</Text>
+          <>
+            <Text style={styles.helpText}>
+              Sign in to unlock mine/all search scopes and private flows.
+            </Text>
+            <View style={styles.actions}>
+              <ActionButton label="Sign in" onPress={() => router.push('/sign-in')} />
+              <ActionButton
+                label="Create account"
+                onPress={() => router.push('/sign-up')}
+                variant="secondary"
+              />
+            </View>
+          </>
         )}
       </View>
 

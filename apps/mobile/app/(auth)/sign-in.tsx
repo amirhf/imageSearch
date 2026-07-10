@@ -1,25 +1,29 @@
 import { Link, router } from 'expo-router';
-import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text } from 'react-native';
 
-import { ActionButton } from '@/components/ActionButton';
-import { Screen } from '@/components/Screen';
 import { useSession } from '@/auth/useSession';
-import { colors, radii, spacing, typography } from '@/theme/tokens';
+import { AuthForm } from '@/components/AuthForm';
+import { Screen } from '@/components/Screen';
+import { colors, typography } from '@/theme/tokens';
 
 export default function SignInScreen() {
-  const { signIn, isConfigured } = useSession();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { signIn, isConfigured, user } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSubmit() {
+  useEffect(() => {
+    if (user) {
+      router.replace('/settings');
+    }
+  }, [user]);
+
+  async function handleSubmit({ email, password }: { email: string; password: string }) {
     setError(null);
     setIsSubmitting(true);
     try {
-      await signIn(email.trim(), password);
-      router.back();
+      await signIn(email, password);
+      router.replace('/settings');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed.');
     } finally {
@@ -29,70 +33,30 @@ export default function SignInScreen() {
 
   return (
     <Screen title="Sign in" subtitle="Use the same Supabase account as the web app.">
-      <View style={styles.panel}>
-        {!isConfigured && (
-          <Text style={styles.errorText}>
-            Supabase env vars are missing. Add EXPO_PUBLIC_SUPABASE_URL and
-            EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
-          </Text>
-        )}
+      {!isConfigured ? (
+        <Text style={styles.errorText}>
+          Supabase env vars are missing. Add EXPO_PUBLIC_SUPABASE_URL and
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
+        </Text>
+      ) : null}
 
-        <TextInput
-          autoCapitalize="none"
-          autoComplete="email"
-          autoCorrect={false}
-          keyboardType="email-address"
-          onChangeText={setEmail}
-          placeholder="Email"
-          placeholderTextColor={colors.muted}
-          style={styles.input}
-          value={email}
-        />
-        <TextInput
-          autoCapitalize="none"
-          onChangeText={setPassword}
-          placeholder="Password"
-          placeholderTextColor={colors.muted}
-          secureTextEntry
-          style={styles.input}
-          value={password}
-        />
-
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <ActionButton
-          label={isSubmitting ? 'Signing in...' : 'Sign in'}
-          onPress={handleSubmit}
-          disabled={!isConfigured || isSubmitting || !email || !password}
-        />
-
-        <Link href="/sign-up" style={styles.link}>
-          Create an account
-        </Link>
-      </View>
+      <AuthForm
+        disabled={!isConfigured}
+        error={error}
+        isSubmitting={isSubmitting}
+        mode="sign-in"
+        onSubmit={handleSubmit}
+        footer={
+          <Link href="/sign-up" style={styles.link}>
+            Create an account
+          </Link>
+        }
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
-  },
-  input: {
-    backgroundColor: colors.canvas,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    color: colors.text,
-    fontSize: 16,
-    minHeight: 50,
-    paddingHorizontal: spacing.md,
-  },
   errorText: {
     color: colors.danger,
     fontSize: typography.caption,

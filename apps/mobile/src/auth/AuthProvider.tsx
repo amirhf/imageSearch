@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Session, User } from '@supabase/supabase-js';
-import { createContext, PropsWithChildren, useEffect, useMemo, useState } from 'react';
+import { createContext, PropsWithChildren, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { isSupabaseConfigured, supabase } from '@/auth/supabase';
 
@@ -25,6 +25,10 @@ export function AuthProvider({ children, queryClient }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(supabase));
 
+  const clearPrivateClientState = useCallback(() => {
+    queryClient.clear();
+  }, [queryClient]);
+
   useEffect(() => {
     if (!supabase) {
       return;
@@ -32,25 +36,35 @@ export function AuthProvider({ children, queryClient }: AuthProviderProps) {
 
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) {
-        return;
-      }
-      setSession(data.session ?? null);
-      setIsLoading(false);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!isMounted) {
+          return;
+        }
+        setSession(data.session ?? null);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+
+      if (event === 'SIGNED_OUT') {
+        clearPrivateClientState();
+      }
     });
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [clearPrivateClientState]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -63,18 +77,22 @@ export function AuthProvider({ children, queryClient }: AuthProviderProps) {
         if (!supabase) {
           throw new Error('Supabase is not configured for the mobile app.');
         }
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           throw error;
         }
+        setSession(data.session ?? null);
       },
       async signUp(email: string, password: string) {
         if (!supabase) {
           throw new Error('Supabase is not configured for the mobile app.');
         }
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) {
           throw error;
+        }
+        if (data.session) {
+          setSession(data.session);
         }
       },
       async signOut() {
@@ -82,10 +100,10 @@ export function AuthProvider({ children, queryClient }: AuthProviderProps) {
           await supabase.auth.signOut();
         }
         setSession(null);
-        queryClient.clear();
+        clearPrivateClientState();
       },
     }),
-    [isLoading, queryClient, session],
+    [clearPrivateClientState, isLoading, session],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

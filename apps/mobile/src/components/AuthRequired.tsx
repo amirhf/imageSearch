@@ -13,7 +13,14 @@ export function AuthRequired({ action }: AuthRequiredProps) {
     <View style={styles.panel}>
       <Text style={styles.title}>Sign in required</Text>
       <Text style={styles.copy}>You need an authenticated Supabase session to {action}.</Text>
-      <ActionButton label="Sign in" onPress={() => router.push('/sign-in')} />
+      <View style={styles.actions}>
+        <ActionButton label="Sign in" onPress={() => router.push('/sign-in')} />
+        <ActionButton
+          label="Create account"
+          onPress={() => router.push('/sign-up')}
+          variant="secondary"
+        />
+      </View>
     </View>
   );
 }
@@ -36,5 +43,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.body,
     lineHeight: 22,
+  },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
 });
